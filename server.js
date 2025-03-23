@@ -57,7 +57,7 @@ async function obterRespostaGPTComIntencao(pergunta) {
         },
         { role: 'user', content: pergunta },
       ],
-      temperature: 0.3,
+      temperature: 0.3, 
       max_tokens: 500,
     });
 
@@ -89,22 +89,40 @@ async function buscarOSIXC() {
 
 // Função para buscar OS por ID
 async function buscarOSPorId(id) {
-  const response = await axios.post('https://demo.ixcsoft.com.br/webservice/v1/su_oss_chamado', {
-    qtype: 'su_oss_chamado.id',
-    query: id,
-    oper: '=',
-    page: '1',
-    rp: '1',
-    sortname: 'su_oss_chamado.id',
-    sortorder: 'asc'
-  }, {
-    auth: { username: process.env.API_USER, password: process.env.API_PASS },
-    headers: { 'ixcsoft': 'listar', 'Content-Type': 'application/json' },
-    httpsAgent: agent
-  });
+    const response = await axios.post('https://demo.ixcsoft.com.br/webservice/v1/su_oss_chamado', {
+      qtype: 'su_oss_chamado.id',
+      query: id,
+      oper: '=',
+      page: '1',
+      rp: '1',
+      sortname: 'su_oss_chamado.id',
+      sortorder: 'asc'
+    }, {
+      auth: { username: process.env.API_USER, password: process.env.API_PASS },
+      headers: { 'ixcsoft': 'listar', 'Content-Type': 'application/json' },
+      httpsAgent: agent
+    });
+  
+    return response.data?.registros || {};
+  }
 
-  return response.data?.registros || {};
-}
+  async function buscarOSPorProtocolo(id) {
+    const response = await axios.post('https://demo.ixcsoft.com.br/webservice/v1/su_oss_chamado', {
+      qtype: 'su_oss_chamado.id',
+      query: id,
+      oper: '=',
+      page: '1',
+      rp: '1',
+      sortname: 'su_oss_chamado.id',
+      sortorder: 'asc'
+    }, {
+      auth: { username: process.env.API_USER, password: process.env.API_PASS },
+      headers: { 'ixcsoft': 'listar', 'Content-Type': 'application/json' },
+      httpsAgent: agent
+    });
+  
+    return response.data?.registros || {};
+  }
 
 // Função para buscar OS por protocolo
 async function buscarOSPorProtocolo(protocolo) {
@@ -218,7 +236,11 @@ app.get('/api/teste-os-protocolo', async (req, res) => {
       return res.json({ sucesso: false, mensagem: 'Nenhuma OS encontrada.' });
     }
 
-    const detalhes = Object.values(os).map(o => `Protocolo: ${o.protocolo}, ID: ${o.id}, Assunto: ${o.assunto}, Status: ${o.status}`).join('\n');
+
+    const detalhes = Object.values(os).map(o => {
+        return `Protocolo: ${o.protocolo}\nID: ${o.id}\nEndereço: ${o.endereco || 'não informado'}\nStatus: ${o.status}\nMensagem: ${o.mensagem || '---'}`;
+      }).join('\n\n');
+
     const mensagem = `Resultado da busca por protocolo ${protocolo}:\n${detalhes}`;
     await enviarMensagemWhatsApp(numeroDestino, mensagem);
 
@@ -250,7 +272,11 @@ app.post('/whatsapp-webhook', async (req, res) => {
         if (Object.keys(os).length === 0) {
           await enviarMensagemWhatsApp(numeroUsuario, `Não encontrei nenhuma OS com ID ${gpt.data.id}.`);
         } else {
-          const detalhes = Object.values(os).map(o => `ID: ${o.id}, Assunto: ${o.assunto}, Status: ${o.status}`).join('\n');
+            const detalhes = Object.values(os).map(o => {
+                return `Protocolo: ${o.protocolo}\nID: ${o.id}\nEndereço: ${o.endereco || 'não informado'}\nStatus: ${o.status}\nMensagem: ${o.mensagem || '---'}`;
+              }).join('\n\n');
+        
+            
           await enviarMensagemWhatsApp(numeroUsuario, `${gpt.mensagem}\n\n${detalhes}`);
         }
       }
@@ -262,8 +288,11 @@ app.post('/whatsapp-webhook', async (req, res) => {
         if (Object.keys(os).length === 0) {
           await enviarMensagemWhatsApp(numeroUsuario, `Não encontrei nenhuma OS com protocolo ${gpt.data.protocolo}.`);
         } else {
-          const detalhes = Object.values(os).map(o => `Protocolo: ${o.protocolo}, ID: ${o.id}, Assunto: ${o.assunto}, Status: ${o.status}`).join('\n');
-          await enviarMensagemWhatsApp(numeroUsuario, `${gpt.mensagem}\n\n${detalhes}`);
+            const detalhes = Object.values(os).map(o => {
+                return `Protocolo: ${o.protocolo}\nID: ${o.id}\nEndereço: ${o.endereco || 'não informado'}\nStatus: ${o.status}\nMensagem: ${o.mensagem || '---'}`;
+              }).join('\n\n');
+        
+            await enviarMensagemWhatsApp(numeroUsuario, `${gpt.mensagem}\n\n${detalhes}`);
         }
       }
     } else {
@@ -271,7 +300,7 @@ app.post('/whatsapp-webhook', async (req, res) => {
     }
 
     res.set('Content-Type', 'text/xml');
-    res.send('<Response></Response>');
+    res.send('<Response>'+gpt.mensage+'</Response>');
   } catch (error) {
     res.status(500).send(error);
   }
