@@ -240,7 +240,7 @@ app.post('/whatsapp-webhook', async (req, res) => {
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
   } catch (error) {
-    res.status(500).send('<Response></Response>');
+    res.status(500).send(error);
   }
 });
 
