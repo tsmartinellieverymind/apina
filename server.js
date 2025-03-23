@@ -135,6 +135,39 @@ app.get('/api/os', async (req, res) => {
   }
 });
 
+async function responderComGPTViaWhatsApp(mensagemRecebida, numeroUsuario) {
+    try {
+      // 1. Pergunta ao GPT
+      const resposta = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: 'Você é um assistente útil e direto, respondendo de forma clara e objetiva. sempre termine a frase dizendo Cambio.' },
+          { role: 'user', content: mensagemRecebida }
+        ],
+        temperature: 0.5,
+        max_tokens: 300,
+      });
+  
+      const mensagemGPT = resposta.choices[0].message.content;
+  
+      // 2. Envia a resposta para o usuário no WhatsApp
+      await client.messages.create({
+        body: mensagemGPT,
+        from: 'whatsapp:+14155238886',
+        to: numeroUsuario
+      });
+  
+      console.log(`Resposta enviada para ${numeroUsuario}: ${mensagemGPT}`);
+    } catch (err) {
+      console.error('Erro ao responder via GPT:', err);
+      await client.messages.create({
+        body: 'Ops! Algo deu errado tentando responder sua mensagem. Tente de novo mais tarde.',
+        from: 'whatsapp:+14155238886',
+        to: numeroUsuario
+      });
+    }
+  }
+  
 
 app.get('/api/teste-gpt-agendamento-protocolo', async (req, res) => {
     const pergunta = 'Gostaria de informações sobre a minha os que tem o protocolo 2018079...quero saber em qual endereço está essa os';
@@ -172,6 +205,18 @@ app.get('/api/teste-gpt-agendamento-protocolo', async (req, res) => {
       res.status(500).json({ erro: 'Erro ao processar teste GPT com protocolo.' });
     }
   });
+
+  app.post('/whatsapp-webhook', async (req, res) => {
+    const mensagemRecebida = req.body.Body;
+    const numeroUsuario = req.body.From;
+  
+    await responderComGPTViaWhatsApp(mensagemRecebida, numeroUsuario);
+  
+    res.set('Content-Type', 'text/xml');
+    res.send('<Response></Response>');
+  });
+  7
+  
 
 // Rota de teste mockado: buscar por protocolo 2018079
 app.get('/api/teste-os-protocolo', async (req, res) => {
