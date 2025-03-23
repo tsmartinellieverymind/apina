@@ -1,0 +1,38 @@
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs
+*.log
+*.log.*
+
+# Environment
+.env
+.env.*.local
+
+# Build output
+dist/
+build/
+out/
+
+# React build
+/client/build
+/public/static
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Optional
+coverage/
+.next/
+.svelte-kit/
+turbo/
+.cache/
