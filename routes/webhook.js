@@ -50,8 +50,10 @@ router.post('/', async (req, res) => {
     if (user.etapa === 'aguardando_os') {
       const osList = await buscarOS(null, user.clienteId);
       log += `📡 Resposta buscarOS: ${JSON.stringify(osList)}\n`;
+      // Aceita OS com status Aberta, Agendada ou Encaminhada (exemplo, você pode ajustar)
+      const abertas = Object.values(osList).filter(os => ['A', 'AG', 'EN'].includes(os.status));
+      
 
-      const abertas = Object.values(osList).filter(os => os.status === 'A');
 
       if (abertas.length === 0) {
         resposta = '📭 No momento você não tem nenhuma OS aberta. Se precisar de ajuda, só chamar!';
