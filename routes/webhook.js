@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { buscarClientePorCpf, buscarOS } = require('../services/ixcService');
+const { buscarClientePorCpf, buscarOSPorClienteId } = require('../services/ixcService');
 const { execute } = require('../app/engine/executor');
 const dayjs = require('dayjs');
 
@@ -48,12 +48,10 @@ router.post('/', async (req, res) => {
     }
 
     if (user.etapa === 'aguardando_os') {
-      const osList = await buscarOS(null, user.clienteId);
-      log += `📡 Resposta buscarOS: ${JSON.stringify(osList)}\n`;
-      // Aceita OS com status Aberta, Agendada ou Encaminhada (exemplo, você pode ajustar)
-      const abertas = Object.values(osList).filter(os => ['A', 'AG', 'EN'].includes(os.status));
-      
+      const osList = await buscarOSPorClienteId(user.clienteId);
+      log += `📡 Resposta buscarOSPorClienteId: ${JSON.stringify(osList)}\n`;
 
+      const abertas = osList.filter(os => ['A', 'AG', 'EN'].includes(os.status));
 
       if (abertas.length === 0) {
         resposta = '📭 No momento você não tem nenhuma OS aberta. Se precisar de ajuda, só chamar!';
@@ -101,10 +99,9 @@ router.post('/', async (req, res) => {
 
     usuarios[numero] = user;
 
-    // Garante que sempre tenha alguma resposta
     if (!resposta) {
       resposta = '🤖 Ainda estou processando... pode tentar de novo rapidinho?';
-      log += '⚠️ Nenhuma resposta gerada. Talvez a etapa esteja inconsistente.\n';
+      log += '⚠️ Nenhuma resposta gerada. Etapa pode estar inconsistente.\n';
     }
 
     return res.json({ para: numero, resposta, log });
