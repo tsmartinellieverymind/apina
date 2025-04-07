@@ -4,7 +4,7 @@ const { buscarClientePorCpf, buscarOS } = require('../services/ixcService');
 const { execute } = require('../app/engine/executor');
 const dayjs = require('dayjs');
 
-const usuarios = {}; // memória simples por número
+const usuarios = {}; // memória temporária por número de telefone
 
 router.post('/', async (req, res) => {
   const mensagem = req.body.Body?.trim();
@@ -19,21 +19,21 @@ router.post('/', async (req, res) => {
       const clienteResp = await buscarClientePorCpf(user.cpf);
 
       if (!clienteResp.cliente || !clienteResp.cliente.id) {
-        resposta = '🚫 Não encontrei seu CPF no sistema. Confere e manda de novo pra nóis.';
+        resposta = '🚫 Oxe, num achei seu CPF aqui não. Confere direitinho e manda de novo pra nóis 🙏';
       } else {
         user.clienteId = clienteResp.cliente.id;
         user.nomeCliente = clienteResp.cliente.razao;
         user.etapa = 'aguardando_os';
-        resposta = `👋 Achei você aqui, ${user.nomeCliente || 'cliente'}! Agora vou ver se tem alguma OS aberta pra ti.`;
+        resposta = `👋 Eita, achei sim! Cê tá como ${user.nomeCliente || 'cliente'} aqui no sistema. Agora vou ver se tem alguma OS aberta, tá bom?`;
       }
     }
 
-    if (user.etapa === 'aguardando_os') {
+    else if (user.etapa === 'aguardando_os') {
       const osList = await buscarOS(null, user.clienteId);
       const abertas = Object.values(osList).filter(os => os.status === 'A');
 
       if (abertas.length === 0) {
-        resposta = '📭 No momento você não tem nenhuma OS aberta. Se precisar de ajuda, só chamar!';
+        resposta = '📭 No momento cê não tem nenhuma OS aberta, viu? Qualquer coisa é só chamar 💬';
         user.etapa = 'finalizado';
       } else {
         user.osList = abertas;
@@ -41,19 +41,19 @@ router.post('/', async (req, res) => {
 
         resposta = `📋 Encontrei ${abertas.length} OS aberta(s):\n` +
           abertas.map(os => `• ${os.id} - ${os.mensagem || 'sem descrição'}`).join('\n') +
-          `\n\nQual dessas você quer agendar? Manda o número da OS.`;
+          `\n\nQual dessas você quer agendar? Manda só o número dela.`;
       }
     }
 
     else if (user.etapa === 'escolher_os') {
       const osEscolhida = user.osList.find(os => os.id === mensagem);
       if (!osEscolhida) {
-        resposta = '🚫 Não achei essa OS. Manda o número certinho, tá bem?';
+        resposta = '🚫 Ixi, não achei essa OS não. Dá uma olhadinha no número e tenta de novo, tá certo?';
       } else {
         user.osEscolhida = osEscolhida;
         user.etapa = 'agendar_data';
         const sugestao = dayjs().add(1, 'day').format('YYYY-MM-DD');
-        resposta = `📅 Que dia você quer agendar? (sugestão: ${sugestao})`;
+        resposta = `📅 Qual dia cê quer agendar? (sugestão: ${sugestao})`;
       }
     }
 
@@ -67,7 +67,12 @@ router.post('/', async (req, res) => {
         melhorHorario: 'M'
       });
 
-      resposta = `✅ Agendado com sucesso!\n${resultado.mensagem}`;
+      if (resultado?.mensagem) {
+        resposta = `✅ Agendamento feito com sucesso, viu!\n${resultado.mensagem}`;
+      } else {
+        resposta = `⚠️ Tivemos um probleminha no agendamento.\nDetalhes: ${JSON.stringify(resultado, null, 2)}`;
+      }
+
       user.etapa = 'finalizado';
     }
 
@@ -75,8 +80,13 @@ router.post('/', async (req, res) => {
     res.json({ para: numero, resposta });
 
   } catch (error) {
-    console.error('❌ Erro no webhook:', error.message);
-    res.status(500).json({ erro: 'Erro ao processar mensagem.' });
+    console.error('❌ Erro no webhook:', error);
+
+    // Envia o log de erro como resposta (apenas para debug/testes)
+    res.json({
+      para: numero,
+      resposta: `❌ Ih rapaz, aconteceu um errim por aqui:\n${error.message || 'Erro desconhecido'}`
+    });
   }
 });
 
