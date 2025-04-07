@@ -157,8 +157,12 @@ async function buscarClientePorCpf(cpf) {
   
     try {
       const response = await api.post('/cliente', body);
+      
+      
+    console.log('body:', body);
+
       const registros = response.data?.registros;
-  
+      console.log('registros:', registros);
       if (!registros || Object.keys(registros).length === 0) {
         return { mensagem: `❌ Cliente com CPF ${cpf} não encontrado.` };
       }
