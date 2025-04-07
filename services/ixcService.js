@@ -146,28 +146,35 @@ async function buscarColaboradorPorCpf(cpf) {
 }
 
 async function buscarClientePorCpf(cpf) {
-  const body = new URLSearchParams();
-  body.append('qtype', 'cliente.cnpj_cpf');
-  body.append('query', cpf);
-  body.append('oper', '=');
-  body.append('page', '1');
-  body.append('rp', '20');
-  body.append('sortname', 'cliente.id');
-  body.append('sortorder', 'asc');
-
-  try {
-    const response = await api.post('/cliente', body);
-    const registros = response.data?.registros;
-
-    if (!registros || registros.length === 0) {
-      return { mensagem: `❌ Cliente com CPF ${cpf} não encontrado.` };
+    const body = new URLSearchParams();
+    body.append('qtype', 'cliente.cnpj_cpf');
+    body.append('query', cpf);
+    body.append('oper', '=');
+    body.append('page', '1');
+    body.append('rp', '50');
+    body.append('sortname', 'cliente.id');
+    body.append('sortorder', 'asc');
+  
+    try {
+      const response = await api.post('/cliente', body);
+      const registros = response.data?.registros;
+  
+      if (!registros || Object.keys(registros).length === 0) {
+        return { mensagem: `❌ Cliente com CPF ${cpf} não encontrado.` };
+      }
+  
+      // Aqui garantimos que o CPF bate 100%
+      const cliente = Object.values(registros).find(c => c.cnpj_cpf === cpf);
+  
+      if (!cliente) {
+        return { mensagem: `❌ Cliente com CPF ${cpf} não encontrado com correspondência exata.` };
+      }
+  
+      return { mensagem: '✅ Cliente encontrado', cliente };
+    } catch (error) {
+      return { mensagem: `❌ Erro ao buscar cliente: ${error.message}` };
     }
-
-    return { mensagem: '✅ Cliente encontrado', cliente: registros[0] };
-  } catch (error) {
-    return { mensagem: `❌ Erro ao buscar cliente: ${error.message}` };
   }
-}
 
 module.exports = {
   buscarOS,
