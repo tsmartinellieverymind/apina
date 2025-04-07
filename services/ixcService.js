@@ -160,10 +160,13 @@ async function buscarClientePorCpf(cpf) {
   body.append('sortname', 'cliente.id');
   body.append('sortorder', 'asc');
 
+  
+  console.log('✅cpfFormatado:', cpfFormatado);
   try {
     const response = await api.post('/cliente', body);
     const registros = response.data?.registros;
 
+    console.log('registros:', registros);
     if (!registros || Object.keys(registros).length === 0) {
       return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado.` };
     }
