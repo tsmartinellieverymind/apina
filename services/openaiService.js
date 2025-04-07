@@ -1,7 +1,10 @@
+
+const { loadAgent } = require('../app/engine/loader');
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-async function interpretarMensagem(mensagem, agent) {
+async function interpretarMensagem(mensagem, agentId = 'default-agent') {
+  const agent = loadAgent(agentId);
   const prompt = `
 Você é ${agent.name}, um assistente com a seguinte função: ${agent.role}.
 Seu objetivo é interpretar a intenção da mensagem recebida e responder sempre no seguinte formato JSON:
@@ -49,3 +52,39 @@ Usuário: ${mensagem}
 }
 
 module.exports = { interpretarMensagem };
+
+
+
+
+const { loadAgent } = require('../app/engine/loader');
+const { OpenAI } = require('openai');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+async function interpretarMensagem(mensagem, agentId = 'default-agent') {
+  const agent = loadAgent(agentId);
+
+  const prompt = `
+Você é ${agent.name}, com a função: ${agent.role}.
+Sempre responda no formato JSON:
+{
+  "intent": "nome_da_action",
+  "data": { ... },
+  "mensagem": "mensagem para o usuário"
+}
+Usuário: ${mensagem}
+  `;
+
+  const resposta = await openai.chat.completions.create({
+    model: 'gpt-3.5-turbo',
+    messages: [
+      { role: 'system', content: agent.personality },
+      { role: 'user', content: prompt }
+    ],
+    temperature: 0.2
+  });
+
+  return JSON.parse(resposta.choices[0].message.content);
+}
+
+module.exports = { interpretarMensagem };
+
