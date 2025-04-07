@@ -154,6 +154,8 @@ async function buscarClientePorCpf(cpf) {
   // Formata o CPF antes de enviar (caso o IXC armazene com pontuação)
   const cpfFormatado = formatarCpf(cpf);
 
+  console.log(`Recebimento de cpf` + cpf);
+  console.log(`Buscando por cpfFormatado` + cpfFormatado);
   // Monta o body com filtro
   const body = new URLSearchParams();
   body.append('qtype', 'cliente.cnpj_cpf');
@@ -175,6 +177,8 @@ async function buscarClientePorCpf(cpf) {
         ixcsoft: 'listar'
       }
     });
+    
+  console.log(`response` + response);
 
     const registros = response.data?.registros;
 
