@@ -153,13 +153,13 @@ function formatarCpf(cpf) {
     const cpfFormatado = formatarCpf(cpf);
   
     const body = new URLSearchParams();
-    body.append('qtype', 'cliente.cnpj_cpf');
-    body.append('query', cpfFormatado);
-    body.append('oper', '=');
-    body.append('page', '1');
-    body.append('rp', '10000');
-    body.append('sortname', 'cliente.id');
-    body.append('sortorder', 'asc');
+    // body.append('qtype', 'cliente.cnpj_cpf');
+    // body.append('query', cpfFormatado);
+    // body.append('oper', '=');
+    // body.append('page', '1');
+    // body.append('rp', '10000');
+    // body.append('sortname', 'cliente.id');
+    // body.append('sortorder', 'asc');
   
     console.log('📤 Enviando busca por CPF formatado:', cpfFormatado);
     console.log('🔧 Body:', body.toString());
