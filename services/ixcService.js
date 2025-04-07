@@ -163,7 +163,12 @@ async function buscarClientePorCpf(cpf) {
   
   console.log('✅cpfFormatado:', cpfFormatado);
   try {
+    
+    console.log('body:', body);
+    
     const response = await api.post('/cliente', body);
+    
+    console.log('response:', response);
     const registros = response.data?.registros;
 
     console.log('registros:', registros);
