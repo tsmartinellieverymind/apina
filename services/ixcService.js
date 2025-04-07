@@ -51,6 +51,8 @@ async function buscarOSPorClienteId(clienteId) {
 
     const registros = response.data?.registros || [];
     console.log('📦 OS encontradas por clienteId:', registros);
+    
+    console.log(' clienteId:', clienteId);
     return registros;
   } catch (error) {
     console.error('❌ Erro ao buscar OS por clienteId:', error);
