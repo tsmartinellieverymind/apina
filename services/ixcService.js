@@ -142,55 +142,65 @@ async function buscarColaboradorPorCpf(cpf) {
     };
   }
 }
+
 function formatarCpf(cpf) {
-    const apenasNumeros = cpf.replace(/\D/g, '');
-    return apenasNumeros.length === 11
-      ? apenasNumeros.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
-      : cpf;
-  }
-  
-  async function buscarClientePorCpf(cpf) {
-    const cpfFormatado = formatarCpf(cpf);
-  
-    const body = new URLSearchParams();
-    // body.append('qtype', 'cliente.cnpj_cpf');
-    // body.append('query', cpfFormatado);
-    // body.append('oper', '=');
-    // body.append('page', '1');
-    // body.append('rp', '10000');
-    // body.append('sortname', 'cliente.id');
-    // body.append('sortorder', 'asc');
-  
-    console.log('📤 Enviando busca por CPF formatado:', cpfFormatado);
-    console.log('🔧 Body:', body.toString());
-  
-    try {
-      const response = await api.post('/cliente', body);
-      const registros = response.data?.registros;
-  
-      if (!registros || Object.keys(registros).length === 0) {
-        console.log('⚠️ Nenhum registro retornado.');
-        return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado.` };
+  const apenasNumeros = cpf.replace(/\D/g, '');
+  return apenasNumeros.length === 11
+    ? apenasNumeros.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+    : cpf;
+}
+
+async function buscarClientePorCpf(cpf) {
+  // Formata o CPF antes de enviar (caso o IXC armazene com pontuação)
+  const cpfFormatado = formatarCpf(cpf);
+
+  // Monta o body com filtro
+  const body = new URLSearchParams();
+  body.append('qtype', 'cliente.cnpj_cpf');
+  body.append('query', cpfFormatado);
+  body.append('oper', '=');
+  body.append('page', '1');
+  body.append('rp', '10000');
+  body.append('sortname', 'cliente.id');
+  body.append('sortorder', 'asc');
+
+  console.log('📤 Enviando busca por CPF formatado:', cpfFormatado);
+  console.log('🔧 Body:', body.toString());
+
+  try {
+    // Inclui o cabeçalho ixcsoft: 'listar' para aplicar o filtro
+    const response = await api.post('/cliente', body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ixcsoft: 'listar'
       }
-  
-      // Loga quantos vieram
-      console.log(`🔍 ${Object.keys(registros).length} cliente(s) retornado(s)`);
-  
-      // Busca exata pelo CPF no campo cnpj_cpf
-      const cliente = Object.values(registros).find(c => (c.cnpj_cpf || '').trim() === cpfFormatado);
-  
-      if (!cliente) {
-        console.log('⚠️ Nenhum cliente com CPF exatamente igual ao informado.');
-        return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado com correspondência exata.` };
-      }
-  
-      console.log('✅ Cliente encontrado:', cliente.razao || cliente.fantasia || cliente.id);
-      return { mensagem: '✅ Cliente encontrado', cliente };
-    } catch (error) {
-      console.error('❌ Erro ao buscar cliente:', error.message);
-      return { mensagem: `❌ Erro ao buscar cliente: ${error.message}` };
+    });
+
+    const registros = response.data?.registros;
+
+    if (!registros || Object.keys(registros).length === 0) {
+      console.log('⚠️ Nenhum registro retornado.');
+      return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado.` };
     }
+
+    // Loga quantos vieram
+    console.log(`🔍 ${Object.keys(registros).length} cliente(s) retornado(s)`);
+
+    // Busca exata pelo CPF no campo cnpj_cpf
+    const cliente = Object.values(registros).find(c => (c.cnpj_cpf || '').trim() === cpfFormatado);
+
+    if (!cliente) {
+      console.log('⚠️ Nenhum cliente com CPF exatamente igual ao informado.');
+      return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado com correspondência exata.` };
+    }
+
+    console.log('✅ Cliente encontrado:', cliente.razao || cliente.fantasia || cliente.id);
+    return { mensagem: '✅ Cliente encontrado', cliente };
+  } catch (error) {
+    console.error('❌ Erro ao buscar cliente:', error.message);
+    return { mensagem: `❌ Erro ao buscar cliente: ${error.message}` };
   }
+}
 
 module.exports = {
   buscarOS,
