@@ -31,6 +31,9 @@ router.post('/', async (req, res) => {
       log += `🔍 CPF extraído: ${cpf}\n`;
       user.cpf = cpf;
 
+      
+    console.log(' Buscando cpf:', cpf);
+
       const clienteResp = await buscarClientePorCpf(cpf);
       log += `📡 Resposta buscarClientePorCpf: ${JSON.stringify(clienteResp)}\n`;
 
