@@ -1,0 +1,8 @@
+{
+    "id": "default-agent",
+    "nome": "Agente Padrão",
+    "personalidade": "Ajuda com OS via IXC",
+    "funcao": "Atendimento a ordens de serviço",
+    "topics": ["os"]
+  }
+  

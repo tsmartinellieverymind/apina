@@ -1,0 +1,23 @@
+{
+    "id": "os",
+    "nome": "Ordens de Serviço",
+    "actions": [
+      {
+        "intent": "atualizar_status_e_data",
+        "arquivo": "atualizar_status_e_data"
+      },
+      {
+        "intent": "agendar_os_completo",
+        "arquivo": "agendar_os_completo"
+      },
+      {
+        "intent": "buscar_colaborador_por_id",
+        "arquivo": "buscar_colaborador_por_id"
+      },
+      {
+        "intent": "buscar_cliente_por_cpf",
+        "arquivo": "buscarClientePorCpf"
+      }
+    ]
+  }
+  

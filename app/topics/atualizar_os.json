@@ -1,0 +1,12 @@
+{
+    "id": "atualizar_os",
+    "name": "Atualização de OS",
+    "actions": [
+      {
+        "intent": "atualizar_status_e_data",
+        "arquivo": "atualizarStatusEData",
+        "descricao": "Atualiza o status e data de atendimento de uma OS"
+      }
+    ]
+  }
+  

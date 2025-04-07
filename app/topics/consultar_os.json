@@ -1,0 +1,12 @@
+{
+    "id": "consultar_os",
+    "name": "Consulta de OS",
+    "actions": [
+      {
+        "intent": "buscar_os_aberta",
+        "arquivo": "buscarOSAberta",
+        "descricao": "Consulta uma OS aberta pelo ID"
+      }
+    ]
+  }
+  
