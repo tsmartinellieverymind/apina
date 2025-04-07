@@ -1,91 +1,68 @@
 const express = require('express');
 const router = express.Router();
 const { buscarClientePorCpf, buscarOSPorClienteId } = require('../services/ixcService');
+const { interpretarMensagem } = require('../services/openaiService');
 const { execute } = require('../app/engine/executor');
 const dayjs = require('dayjs');
 
-const usuarios = {};
+const usuarios = {}; // memória simples
 
-/**
- * Extrai CPF da mensagem (com ou sem pontuação) e retorna só os dígitos.
- */
 function extrairCpf(texto) {
   const match = texto.match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/);
   return match ? match[0].replace(/[^\d]/g, '') : null;
 }
 
 router.post('/', async (req, res) => {
-  const mensagem = req.body.Body?.trim() || '';
+  const mensagem = req.body.Body?.trim();
   const numero = req.body.From;
-
-  // Se não existir "sessão" para este usuário, cria
-  if (!usuarios[numero]) {
-    usuarios[numero] = { etapa: 'inicio' };
-  }
-  const user = usuarios[numero];
+  const user = usuarios[numero] || { etapa: 'inicio' };
 
   let resposta = '';
-  let log = `📥 Msg recebida: "${mensagem}"\n👤 Número: ${numero}\nEtapa atual: ${user.etapa}\n`;
+  let log = `📥 Mensagem: "${mensagem}"\n👤 De: ${numero}\n📌 Etapa: ${user.etapa}\n`;
 
   try {
-    switch (user.etapa) {
-      /**
-       * ETAPA "inicio"
-       * Aqui forçamos o usuário a informar CPF logo de cara.
-       */
+    const { intent, data, mensagem: respostaBase } = await interpretarMensagem(mensagem);
+
+    log += `🧠 Intent detectada: ${intent}\n📦 Data extraída: ${JSON.stringify(data)}\n`;
+
+    switch (intent) {
       case 'inicio': {
-        resposta = 'Olá! Para começar, por favor me informe seu CPF (com ou sem pontuação).';
-        // Assim que o chatbot diz isso, passamos para a etapa "cpf"
+        resposta = 'Olá! Pra gente começar, me manda seu CPF (com ou sem pontuação).';
         user.etapa = 'cpf';
         break;
       }
 
-      /**
-       * ETAPA "cpf"
-       * Lê a mensagem do usuário, tenta extrair CPF.
-       * Se encontrar, busca no IXC. Se não encontrar, pede novamente.
-       */
-      case 'cpf': {
+      case 'informar_cpf': {
         const cpf = extrairCpf(mensagem);
         if (!cpf) {
-          resposta = 'Não consegui encontrar o CPF na sua mensagem. Por favor, envie o CPF corretamente.';
-          log += '⚠️ CPF não encontrado.\n';
-          return res.json({ para: numero, resposta, log });
+          resposta = '❗ Não consegui entender o CPF. Pode mandar de novo, por favor?';
+          break;
         }
 
-        log += `🔍 CPF extraído: ${cpf}\n`;
         user.cpf = cpf;
-
-        // Buscar cliente no IXC
         const clienteResp = await buscarClientePorCpf(cpf);
-        log += `📡 Resposta buscarClientePorCpf: ${JSON.stringify(clienteResp)}\n`;
+        log += `📡 Resultado da busca de cliente: ${JSON.stringify(clienteResp)}\n`;
 
         if (!clienteResp.cliente?.id) {
-          resposta = '🚫 Não encontrei seu CPF no sistema. Verifique e tente novamente.';
-          log += '❌ Cliente não encontrado.\n';
-          return res.json({ para: numero, resposta, log });
+          resposta = '🚫 Não encontrei esse CPF no sistema. Confere aí e me manda de novo.';
+          break;
         }
 
         user.clienteId = clienteResp.cliente.id;
         user.nomeCliente = clienteResp.cliente.razao;
-        user.etapa = 'aguardando_os';
+        user.etapa = 'verificar_os';
 
-        resposta = `Que bom ter você aqui, ${user.nomeCliente || 'cliente'}! Vou verificar se existe alguma OS aberta pra você.`;
+        resposta = `Beleza, ${user.nomeCliente || 'cliente'}! Agora vou dar uma olhadinha nas suas OS abertas.`;
         break;
       }
 
-      /**
-       * ETAPA "aguardando_os"
-       * Aqui já temos o clienteId, então buscamos as OS abertas e decidimos o que perguntar.
-       */
-      case 'aguardando_os': {
+      case 'verificar_os': {
         const osList = await buscarOSPorClienteId(user.clienteId);
-        log += `📡 Resposta buscarOSPorClienteId: ${JSON.stringify(osList)}\n`;
+        log += `📋 OS encontradas: ${JSON.stringify(osList)}\n`;
 
         const abertas = osList.filter(os => ['A', 'AG', 'EN'].includes(os.status));
-
         if (abertas.length === 0) {
-          resposta = 'No momento, não há nenhuma OS aberta no seu cadastro. Se precisar de outra coisa, é só me falar.';
+          resposta = '📭 No momento você não tem nenhuma OS aberta. Se precisar, só chamar!';
           user.etapa = 'finalizado';
           break;
         }
@@ -95,38 +72,28 @@ router.post('/', async (req, res) => {
 
         resposta = `Encontrei ${abertas.length} OS aberta(s):\n` +
           abertas.map(os => `• ${os.id} - ${os.mensagem || 'Sem descrição'}`).join('\n') +
-          '\n\nQual delas você quer agendar? Mande o número da OS.';
+          `\n\nQual delas você quer agendar? Me manda o número dela.`;
         break;
       }
 
-      /**
-       * ETAPA "escolher_os"
-       * O usuário manda o número de uma OS. Validamos e partimos para o agendamento.
-       */
       case 'escolher_os': {
-        const osEscolhida = user.osList?.find(os => os.id === mensagem);
-        if (!osEscolhida) {
-          resposta = 'Não achei essa OS na sua lista. Manda o número certinho, por favor.';
-          log += '❌ OS não encontrada.\n';
+        const os = user.osList?.find(os => os.id === mensagem);
+        if (!os) {
+          resposta = '❗ Não encontrei essa OS na sua lista. Dá uma olhadinha e manda de novo.';
           break;
         }
 
-        user.osEscolhida = osEscolhida;
+        user.osEscolhida = os;
         user.etapa = 'agendar_data';
 
         const sugestao = dayjs().add(1, 'day').format('YYYY-MM-DD');
-        resposta = `Perfeito! Em qual dia você quer agendar? (Sugestão: ${sugestao})`;
+        resposta = `Qual dia quer agendar? (Sugestão: ${sugestao})`;
         break;
       }
 
-      /**
-       * ETAPA "agendar_data"
-       * Recebe a data, chama a action de agendar.
-       */
       case 'agendar_data': {
-        const data = mensagem || dayjs().add(1, 'day').format('YYYY-MM-DD');
+        const data = data?.data || dayjs().add(1, 'day').format('YYYY-MM-DD');
 
-        // Exemplo de chamada ao "execute"
         const resultado = await execute('default-agent', 'agendar_os_completo', {
           osId: user.osEscolhida.id,
           novaData: `${data} 10:00:00`,
@@ -134,44 +101,31 @@ router.post('/', async (req, res) => {
           melhorHorario: 'M'
         });
 
-        resposta = resultado.mensagem || 'Pronto! Sua OS foi agendada com sucesso.';
-        log += `🧠 Resultado agendamento: ${JSON.stringify(resultado)}\n`;
-
+        resposta = resultado.mensagem || '✅ Agendamento feito com sucesso!';
         user.etapa = 'finalizado';
         break;
       }
 
-      /**
-       * Se tiver acabado, mas o usuário continuar conversando,
-       * podemos reiniciar ou ver se faz sentido manter "finalizado".
-       */
-      case 'finalizado': {
-        resposta = 'Tudo certo. Se precisar de mais alguma coisa, é só avisar.';
+      case 'finalizado':
+      default: {
+        resposta = respostaIA || 'Tudo certo! Se precisar de mais alguma coisa, é só mandar mensagem.';
         break;
       }
-
-      default: {
-        log += `Etapa desconhecida: ${user.etapa}. Resetando para "inicio".\n`;
-        user.etapa = 'inicio';
-        resposta = 'Vamos recomeçar? Por favor, me informe o CPF novamente.';
-      }
-    } // Fim do switch
+    }
 
     usuarios[numero] = user;
 
     if (!resposta) {
-      resposta = 'Não entendi bem. Pode repetir, por favor?';
-      log += '⚠️ Nenhuma resposta gerada.\n';
+      resposta = '⚠️ Tô meio confuso aqui. Pode tentar de novo, por favor?';
     }
 
     return res.json({ para: numero, resposta, log });
 
-  } catch (err) {
-    const erro = err?.message || 'Erro desconhecido';
-    console.error('❌ Erro no webhook:', erro);
+  } catch (error) {
+    const erro = error.message || 'Erro desconhecido';
     log += `🔥 Erro: ${erro}\n`;
-    const respostaErro = 'Desculpe, ocorreu um erro. Tente novamente mais tarde.';
-    return res.json({ para: numero, resposta: respostaErro, log });
+    resposta = '❌ Opa! Deu um errinho aqui. Já estamos resolvendo. Tenta de novo daqui a pouco.';
+    return res.json({ para: numero, resposta, log });
   }
 });
 
