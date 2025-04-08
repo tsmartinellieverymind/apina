@@ -1,10 +1,23 @@
+require('dotenv').config();
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const { loadAgent } = require('../app/engine/loader');
 const { OpenAI } = require('openai');
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function interpretarMensagem(mensagem, agentId = 'default-agent') {
+  if (!mensagem || typeof mensagem !== 'string') {
+    console.error('❌ Mensagem inválida recebida para interpretação:', mensagem);
+    return {
+      intent: 'default',
+      data: {},
+      mensagem: 'Desculpa, não consegui entender o que você quis dizer. Pode tentar de novo?'
+    };
+  }
+
   const agent = loadAgent(agentId);
+
   const prompt = `
 Você é ${agent.name}, um assistente com a seguinte função: ${agent.role}.
 Seu objetivo é interpretar a intenção da mensagem recebida e responder sempre no seguinte formato JSON:
@@ -28,25 +41,25 @@ Agora analise a mensagem abaixo:
 Usuário: ${mensagem}
 `;
 
-  const resposta = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
-    messages: [
-      { role: 'system', content: agent.personality },
-      { role: 'user', content: prompt }
-    ],
-    temperature: 0.2
-  });
-
-  const respostaText = resposta.choices[0].message.content;
-
   try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: agent.personality },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2
+    });
+
+    const respostaText = resposta.choices[0].message.content;
     return JSON.parse(respostaText);
-  } catch (e) {
-    console.error('❌ Erro ao parsear resposta da IA:', respostaText);
+
+  } catch (error) {
+    console.error('❌ Erro no OpenAI:', error);
     return {
       intent: 'default',
       data: {},
-      mensagem: 'Desculpa, não consegui entender o que você quis dizer.'
+      mensagem: 'Desculpa, não entendi o que você quis dizer. Pode tentar de novo?'
     };
   }
 }

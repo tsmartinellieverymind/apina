@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { buscarClientePorCpf, buscarOSPorClienteId } = require('../services/ixcService');
+const { buscarClientePorCpf, buscarOSPorClienteId, atualizarOS } = require('../services/ixcService');
 const { interpretarMensagem } = require('../services/openaiService');
-const { execute } = require('../app/engine/executor');
 const dayjs = require('dayjs');
+const { enviarMensagemWhatsApp } = require('../services/twillioService');
 
-const usuarios = {}; // memória simples
+const usuarios = {};
 
 function extrairCpf(texto) {
   const match = texto.match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/);
@@ -22,15 +22,13 @@ router.post('/', async (req, res) => {
 
   try {
     const { intent, data, mensagem: respostaBase } = await interpretarMensagem(mensagem);
-
     log += `🧠 Intent detectada: ${intent}\n📦 Data extraída: ${JSON.stringify(data)}\n`;
 
     switch (intent) {
-      case 'inicio': {
+      case 'inicio':
         resposta = 'Olá! Pra gente começar, me manda seu CPF (com ou sem pontuação).';
         user.etapa = 'cpf';
         break;
-      }
 
       case 'informar_cpf': {
         const cpf = extrairCpf(mensagem);
@@ -69,6 +67,7 @@ router.post('/', async (req, res) => {
 
         user.osList = abertas;
         user.etapa = 'escolher_os';
+        user.osEscolhida = abertas;
 
         resposta = `Encontrei ${abertas.length} OS aberta(s):\n` +
           abertas.map(os => `• ${os.id} - ${os.mensagem || 'Sem descrição'}`).join('\n') +
@@ -92,14 +91,17 @@ router.post('/', async (req, res) => {
       }
 
       case 'agendar_data': {
-        const data = data?.data || dayjs().add(1, 'day').format('YYYY-MM-DD');
+        const dataFinal = data?.data_agendamento || dayjs().add(1, 'day').format('YYYY-MM-DD');
+        const osEscolhida = user.osEscolhida?.['0'] || user.osEscolhida;
 
-        const resultado = await execute('default-agent', 'agendar_os_completo', {
-          osId: user.osEscolhida.id,
-          novaData: `${data} 10:00:00`,
-          idTecnico: user.osEscolhida.id_tecnico || '0',
-          melhorHorario: 'M'
-        });
+        const payloadOriginal = {
+          ...osEscolhida,
+          data_agenda_final: `${dataFinal} 10:00:00`,
+          melhor_horario_agenda: 'M'
+        };
+
+        const resultado = await atualizarOS(osEscolhida.id, payloadOriginal);
+        log += `🛠 Atualização OS: ${JSON.stringify(resultado)}\n`;
 
         resposta = resultado.mensagem || '✅ Agendamento feito com sucesso!';
         user.etapa = 'finalizado';
@@ -107,10 +109,9 @@ router.post('/', async (req, res) => {
       }
 
       case 'finalizado':
-      default: {
-        resposta = respostaIA || 'Tudo certo! Se precisar de mais alguma coisa, é só mandar mensagem.';
+      default:
+        resposta = respostaBase || 'Tudo certo! Se precisar de mais alguma coisa, é só mandar mensagem.';
         break;
-      }
     }
 
     usuarios[numero] = user;
@@ -119,13 +120,17 @@ router.post('/', async (req, res) => {
       resposta = '⚠️ Tô meio confuso aqui. Pode tentar de novo, por favor?';
     }
 
-    return res.json({ para: numero, resposta, log });
+    // ✅ Envia a resposta via WhatsApp (Twilio)
+    await enviarMensagemWhatsApp(numero, resposta);
+    return res.json({ para: numero, status: '📤 Mensagem enviada via Twilio', log });
 
   } catch (error) {
-    const erro = error.message || 'Erro desconhecido';
-    log += `🔥 Erro: ${erro}\n`;
+    const erroCompleto = error?.stack || error?.message || 'Erro desconhecido';
+    log += `🔥 Erro detalhado:\n${erroCompleto}\n`;
+
     resposta = '❌ Opa! Deu um errinho aqui. Já estamos resolvendo. Tenta de novo daqui a pouco.';
-    return res.json({ para: numero, resposta, log });
+    await enviarMensagemWhatsApp(numero, resposta);
+    return res.json({ para: numero, status: '📤 Erro enviado via Twilio', log });
   }
 });
 
