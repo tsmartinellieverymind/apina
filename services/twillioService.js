@@ -8,6 +8,9 @@ const client = twilio(accountSid, authToken);
 
 // Função para enviar mensagem via Twilio
 async function enviarMensagemWhatsApp(to, mensagem) {
+
+  console.log(`✅✅✅✅✅`  + mensagem);
+  
   try {
     const message = await client.messages.create({
       body: mensagem,

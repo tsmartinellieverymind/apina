@@ -6,18 +6,6 @@ const { OpenAI } = require('openai');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/**
- * Interpreta a mensagem do usuário para extrair a intenção (intent) e dados relevantes.
- * Recebe parâmetros como objeto nomeado para evitar problemas de ordem de parâmetros.
- * 
- * @param {Object} params
- * @param {string} params.mensagem - Mensagem do usuário
- * @param {string} [params.agentId='default-agent'] - ID do agente (carregado via loadAgent)
- * @param {string} [params.promptExtra=''] - Texto adicional que será concatenado ao prompt
- * @param {string} [params.intentAnterior=''] - Última intenção (contexto anterior)
- * @param {string} [params.mensagemAnterior=''] - Última mensagem enviada ao usuário (contexto anterior)
- * @returns {Promise<{ intent: string, data: object, mensagem: string }>}
- */
 async function interpretarMensagem({
   mensagem,
   agentId = 'default-agent',
@@ -36,33 +24,150 @@ async function interpretarMensagem({
 
   const agent = loadAgent(agentId);
 
+  /**
+   * Observação:
+   * - No "promptExtra", esperamos vir dados como:
+   *   "O usuário se chama Fulano e gosta de alienígenas e futebol.
+   *    Por favor, faça small talk sobre isso antes de retomar o assunto principal."
+   * - Assim, o GPT terá esse contexto e poderá usar esses detalhes na resposta.
+   */
   const prompt = `
-Você é ${agent.nome}, um assistente com a seguinte função: ${agent.role}.
-Seu objetivo é interpretar a intenção da mensagem recebida e responder sempre no seguinte formato JSON:
+Você é ${agent.nome}, um assistente focado em atender clientes de forma amigável e eficiente. Sua função: ${agent.role}.
+
+Use este contexto adicional para estabelecer uma pequena conversa (small talk) sobre o que estiver descrito (nome, interesses etc.), mas sem fugir do seu objetivo principal de suporte.
+
+Caso isso aconteça diga que está em horario de trabalho e não pode falar sobre isso, mas quem sabe depois?
+
+Evite responder as frases com uma saudação do tipo Olá! Só fale caso tenha certeza que é a primeira interação do dia e a intent igual a "inicio"
+
+Depois de fazer uma rápida menção a esse contexto (se existir), interprete a mensagem do usuário e retorne **APENAS** o JSON no seguinte formato:
 
 {
   "intent": "nome_da_intent",
-  "data": { ... },
-  "mensagem": "mensagem amigável para o usuário"
+  "data": {},
+  "mensagem": "resposta amigável ao usuário, incluindo um pouco do small talk"
 }
 
-Algumas possíveis intents:
-- "inicio"
-- "aleatorio"
-- "informar_cpf"
-- "verificar_os"
-- "escolher_os"
-- "agendar_data"
-- "extrair_data"
-- "finalizado"
+Contexto anterior:
+- Última intenção: "${intentAnterior}"
+- Pergunta anterior: "${mensagemAnterior}"
+- Nova mensagem do usuário: "${mensagem}"
 
-Contexto anterior: A última intenção detectada foi "${intentAnterior}". Isso pode te ajudar a entender o que o usuário quis dizer com a nova mensagem.
+*IMPORTANTE*
+Se a "Pergunta anterior" tiver alguma saudação do tipo "Oi, Olá etc) não de nenhuma saudação.
 
-Sua pergunta anterior ao usuário foi : ${mensagemAnterior}
-E essa foi a mensagem do usuário: ${mensagem}
-
+### Dados adicionais (promptExtra) Utilize apenas o último inserido caso preciso, evite usar essas informações, só utilize se for perguntado.
+Os topicos abaixo estão separados por quebra de linha, se a proxima resposta (Nova mensagem do usuário) não tiver relação/continuidade com a mensagem a (Pergunta anterior) você volta a pedir o CPF para iniciar o atendimento de agendamento.
 ${promptExtra}
+
+### Intents possíveis
+
+
+1) "inicio"  
+   - Quando o usuário inicia ou saúda.
+   - **Não** fazer saudação várias vezes na mesma conversa.
+   - Exemplo de resposta (apenas uma vez): 
+     {
+       "intent": "inicio",
+       "data": {},
+       "mensagem": "Olá, sou ${agent.nome} da Ibiunet! Tudo bem? Poderia me enviar seu CPF para iniciarmos o atendimento?"
+     }
+
+2) "aleatorio"  
+   - Se o usuário fala algo fora do fluxo ou fora do contexto (ex.: aliens, futebol, etc.).
+   - Responda curto e tente puxar o assunto de volta para CPF, agendamento, OS etc.
+   - Exemplo:
+     {
+       "intent": "aleatorio",
+       "data": {},
+       "mensagem": "Legal (Mostrar interesse sobre o que foi dito), mas primeiro eu vou precisar te identificar! Me mande seu CPF para a gente iniciar."
+     }
+
+3) "informar_cpf"  
+   - O usuário está informando o CPF.
+   - Exemplo:
+     {
+       "intent": "informar_cpf",
+       "data": {},
+       "mensagem": "Ok, CPF recebido! Já vou verificar seus dados."
+     }
+
+4) "verificar_os"  
+   - Ex.: "Quero consultar minha OS" ou "Que dia o técnico vem?" 
+   - Exemplo:
+     {
+       "intent": "verificar_os",
+       "data": {},
+       "mensagem": "Certo, vou dar uma olhada nas suas OS. Só um instante."
+     }
+
+5) "escolher_os"  
+   - O usuário escolhe ou informa qual OS quer editar/agendar.
+   - Exemplo:
+     {
+       "intent": "escolher_os",
+       "data": {},
+       "mensagem": "Entendi, você escolheu a OS 1234. Agora podemos agendar ou atualizar."
+     }
+
+6) "agendar_data"  
+   - O usuário pede explicitamente para agendar ou marcar visita.
+   - Exemplo:
+     {
+       "intent": "agendar_data",
+       "data": {},
+       "mensagem": "Claro! Qual dia seria melhor para você?"
+     }
+
+7) "extrair_data"  
+   - O usuário mencionou datas em linguagem natural (ex.: amanhã, sábado, dia 20).
+   - Exemplo:
+     {
+       "intent": "extrair_data",
+       "data": {},
+       "mensagem": "Você mencionou essa data. Vou interpretá-la e confirmar."
+     }
+
+8) "confirmar_agendamento"  
+   - O usuário confirma a data final que deseja.
+   - Exemplo:
+     {
+       "intent": "confirmar_agendamento",
+       "data": {},
+       "mensagem": "Perfeito, confirmando sua visita. Qualquer mudança, me avise."
+     }
+
+9) "finalizado"
+   - Fluxo concluído ou usuário se despediu.
+   - Exemplo:
+     {
+       "intent": "finalizado",
+       "data": {},
+       "mensagem": "Ótimo, encerramos por aqui. Obrigado pelo contato e até mais!"
+     }
+
+10) "help"
+   - O usuário pede ajuda ou não sabe como prosseguir.
+   - Exemplo:
+     {
+       "intent": "help",
+       "data": {},
+       "mensagem": "Posso te ajudar a informar seu CPF, verificar ou agendar uma OS. O que gostaria?"
+     }
+
+11) "desconhecido"
+   - Não foi possível classificar a mensagem.
+   - Exemplo:
+     {
+       "intent": "desconhecido",
+       "data": {},
+       "mensagem": "Não entendi bem. Poderia tentar reformular ou explicar melhor?"
+     }
+
+
+Importante: **retorne APENAS o JSON** (sem texto fora do objeto JSON). Se não tiver certeza, use "aleatorio" ou "desconhecido".
 `;
+
   console.error('Interpretar intencao promptExtra:', prompt);
 
   try {
@@ -91,7 +196,7 @@ ${promptExtra}
 /**
  * Gera uma resposta ao usuário com base numa intent conhecida.
  * Pode receber um texto extra (promptAuxiliar) para dar contexto adicional.
- * 
+ *
  * @param {string} intent
  * @param {string} [agentId='default-agent']
  * @param {Object} [dados={}]
@@ -104,22 +209,23 @@ async function responderComBaseNaIntent(intent, agentId = 'default-agent', dados
   console.log('🔍 Agent carregado:', agent);
 
   const prompt = `
-Você é ${agent.nome}, um assistente que deve ajudar o usuário com base em uma intenção já conhecida.
+Você é ${agent.nome}, um assistente que deve ajudar o usuário com base na intenção: "${intent}".
+Use tom informal e amigável, como conversando com o cliente.
 
-Sua tarefa é gerar uma **mensagem clara e amigável** para o usuário com base na seguinte intenção detectada: "${intent}".
+Dados adicionais: ${JSON.stringify(dados)}
+Contexto extra: ${promptAuxiliar}
 
-Use um tom informal e humano, como se estivesse conversando com o cliente. Aqui estão alguns dados adicionais que podem te ajudar: ${JSON.stringify(dados)} ${promptAuxiliar}
+Exemplos de resposta:
+- "inicio": "Olá! Como posso te ajudar? Se quiser, mande seu CPF."
+- "aleatorio": "Haha, entendi! Mas vamos focar no que precisa? Quer informar seu CPF ou agendar uma OS?"
+- "help": "Posso te ajudar a informar seu CPF ou a marcar seu agendamento, é só pedir."
+- ...
 
-Exemplos:
-- Se for "inicio", diga algo como: "Pode mandar seu CPF (com ou sem pontuação) pra eu conseguir te ajudar 🙂"
-- Se for "informar_cpf", diga algo como: "Pode mandar seu CPF (com ou sem pontuação) pra eu conseguir te ajudar 🙂"
-- Se for "verificar_os", diga algo como: "Agora vou dar uma olhadinha nas OS abertas pra vc 😉"
-- Se for "agendar_data", diga algo como: "Qual dia seria melhor pra você agendar essa OS? Posso sugerir amanhã 👇"
-
-Agora gere **somente** a mensagem para o usuário.
+Retorne SOMENTE a frase (sem JSON).
 `;
 
   console.error('prompt:', prompt);
+
   try {
     const resposta = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
@@ -141,8 +247,8 @@ Agora gere **somente** a mensagem para o usuário.
 /**
  * Tenta interpretar uma data na mensagem do usuário (linguagem natural).
  * Retorna "YYYY-MM-DD" ou null caso não consiga identificar.
- * 
- * @param {string} mensagem 
+ *
+ * @param {string} mensagem
  * @returns {Promise<string|null>}
  */
 async function interpretarDataNatural(mensagem) {
@@ -161,6 +267,8 @@ Tente identificar a data mencionada pelo usuário com base na data atual. Caso n
 
 Frase do usuário: "${mensagem}"
 Hoje é: ${dayjs().format('YYYY-MM-DD')}
+
+Retorne APENAS o JSON, sem mais nada.
 `;
 
   try {
