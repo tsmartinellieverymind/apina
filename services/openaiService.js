@@ -54,7 +54,7 @@ Contexto anterior:
 - Nova mensagem do usuário: "${mensagem}"
 
 *IMPORTANTE*
-Se a "Pergunta anterior" tiver alguma saudação do tipo "Oi, Olá etc) não de nenhuma saudação.
+Se a "Pergunta anterior" tiver alguma saudação do tipo (Oi, Olá etc) e a intent anterior for diferente de inicial, não de nenhuma saudação.
 
 ### Dados adicionais (promptExtra) Utilize apenas o último inserido caso preciso, evite usar essas informações, só utilize se for perguntado.
 Os topicos abaixo estão separados por quebra de linha, se a proxima resposta (Nova mensagem do usuário) não tiver relação/continuidade com a mensagem a (Pergunta anterior) você volta a pedir o CPF para iniciar o atendimento de agendamento.
@@ -84,7 +84,7 @@ ${promptExtra}
      }
 
 3) "informar_cpf"  
-   - O usuário está informando o CPF.
+   - O usuário está informando o CPF. Ex:(522.473.726-51 ; 52247372651) deve conter 11 digitos menos que nova a intent deve ser considerada escolher_os
    - Exemplo:
      {
        "intent": "informar_cpf",
@@ -102,7 +102,7 @@ ${promptExtra}
      }
 
 5) "escolher_os"  
-   - O usuário escolhe ou informa qual OS quer editar/agendar.
+   - O usuário escolhe ou informa qual OS quer editar/agendar. Pode vir apenas como um número sempre menor que 9 digitos. verificar 
    - Exemplo:
      {
        "intent": "escolher_os",
@@ -164,6 +164,14 @@ ${promptExtra}
        "mensagem": "Não entendi bem. Poderia tentar reformular ou explicar melhor?"
      }
 
+12) "extrair_hora"  
+   - O usuário mencionou datas em linguagem natural (ex.: amanhã, sábado, dia 20) e também horario ( 10 da manhã, final da tarde etc)
+   - Exemplo:
+     {
+       "intent": "extrair_hora",
+       "data": {},
+       "mensagem": "Você mencionou essa data. Vou interpretá-la e confirmar."
+     }
 
 Importante: **retorne APENAS o JSON** (sem texto fora do objeto JSON). Se não tiver certeza, use "aleatorio" ou "desconhecido".
 `;
@@ -206,10 +214,11 @@ Importante: **retorne APENAS o JSON** (sem texto fora do objeto JSON). Se não t
 async function responderComBaseNaIntent(intent, agentId = 'default-agent', dados = {}, promptAuxiliar = '') {
   const agent = loadAgent(agentId) || { nome: 'Assistente', role: 'ajudar o usuário de forma gentil e eficaz.' };
 
-  console.log('🔍 Agent carregado:', agent);
+  //console.log('🔍 Agent carregado:', agent);
 
   const prompt = `
 Você é ${agent.nome}, um assistente que deve ajudar o usuário com base na intenção: "${intent}".
+Sua função: ${agent.role}.
 Use tom informal e amigável, como conversando com o cliente.
 
 Dados adicionais: ${JSON.stringify(dados)}
@@ -217,14 +226,14 @@ Contexto extra: ${promptAuxiliar}
 
 Exemplos de resposta:
 - "inicio": "Olá! Como posso te ajudar? Se quiser, mande seu CPF."
-- "aleatorio": "Haha, entendi! Mas vamos focar no que precisa? Quer informar seu CPF ou agendar uma OS?"
+- "aleatorio": Essa intent pode variar muito mas tente fazer com que o usuario responta a pergunta anterior que era " ${JSON.stringify(dados.mensagemAnteriorCliente)}
 - "help": "Posso te ajudar a informar seu CPF ou a marcar seu agendamento, é só pedir."
-- ...
+- "os_nao_encontrada": 
 
 Retorne SOMENTE a frase (sem JSON).
 `;
 
-  console.error('prompt:', prompt);
+ console.error('### PROMPT INTENÇÃO ###:', prompt);
 
   try {
     const resposta = await openai.chat.completions.create({
@@ -290,8 +299,100 @@ Retorne APENAS o JSON, sem mais nada.
   }
 }
 
+async function interpretaDataeHora(mensagem) {
+  const prompt = `
+Você é um assistente que interpreta datas e horários em linguagem natural.
+
+Seu objetivo é identificar tanto a data quanto o horário mencionados pelo usuário.
+
+As respostas devem seguir este formato:
+{
+  "data_interpretada": "YYYY-MM-DD",
+  "horario_interpretado": "HH:MM:SS"
+}
+
+Horários válidos:
+- 08:00:00
+- 10:00:00
+- 13:00:00
+- 15:00:00
+- 17:00:00
+
+Se a data ou o horário não puderem ser identificados, use null nos respectivos campos.
+
+Mensagem do usuário: "${mensagem}"
+Hoje é: ${dayjs().format('YYYY-MM-DD')}
+
+Retorne APENAS o JSON acima, sem mais nada.
+`;
+
+  try {
+    const openai = require('openai');
+    const client = new openai.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    const resposta = await client.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'Você é um assistente que interpreta datas e horários informais.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1
+    });
+
+    const json = JSON.parse(resposta.choices[0].message.content);
+    console.log('📅 Data e horário interpretados:', json);
+    return json;
+  } catch (error) {
+    console.error('❌ Erro ao interpretar data e hora:', error);
+    return {
+      data_interpretada: null,
+      horario_interpretado: null
+    };
+  }
+}
+
+async function interpretaHora(mensagem) {
+  const prompt = `
+Você é um assistente que interpreta horários em linguagem natural e retorna sempre no seguinte formato JSON:
+
+{
+  "hora_interpretada": "HH:mm:00"
+}
+
+Tente identificar o horário mencionado pelo usuário com base na frase. Caso não encontre nenhuma hora válida, responda:
+
+{
+  "hora_interpretada": null
+}
+
+Frase do usuário: "${mensagem}"
+
+Retorne APENAS o JSON, sem mais nada.
+`;
+
+  try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'Você é um assistente que interpreta horários informais.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1
+    });
+
+    const json = JSON.parse(resposta.choices[0].message.content);
+    console.error('hora interpretada:', json.hora_interpretada);
+    return json.hora_interpretada;
+  } catch (error) {
+    console.error('❌ Erro ao interpretar hora:', error);
+    return null;
+  }
+}
+
 module.exports = {
   interpretarMensagem,
   responderComBaseNaIntent,
-  interpretarDataNatural
+  interpretarDataNatural,
+  interpretaHora,
+  interpretaDataeHora
 };
