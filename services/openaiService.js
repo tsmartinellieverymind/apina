@@ -3,8 +3,172 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const dayjs = require('dayjs');
 const { loadAgent } = require('../app/engine/loader');
 const { OpenAI } = require('openai');
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { INTENTS, getIntentByCodigo } = require('../app/models/IntentModel');
+
+function gerarTodasAsIntentsPrompt() {
+  return INTENTS.map(i => {
+    const examples = i.examples?.map(e => `  - ${e}`).join('\n') || '  (sem exemplos)';
+    return `// ${i.nome}
+intent: "${i.codigo}"
+descrição: ${i.gerarPrompt()}
+exemplos:\n${examples}`;
+  }).join('\n\n');
+}
+async function gerarMensagemDaIntent({
+  intent,
+  agentId = 'default-agent',
+  dados = {},
+  promptExtra = ''
+}) {
+  const agent = loadAgent(agentId);
+  const intentData = INTENTS.find(i => i.codigo === intent);
+
+  const sugestoesDeRespostas = intentData?.responses?.length
+    ? `Alguns exemplos de como você pode responder:\n${intentData.responses.map(r => `- ${r}`).join('\n')}`
+    : '';
+
+  const prompt = `
+Você é ${agent.nome}, sua função é ${agent.role}. Você tem a seguinte personalidade: ${agent.personality}
+
+${intent === 'aleatorio' 
+  ? 'Faça um small talk com a mensagem recebida (veja em "Contexto extra") e retome o assunto anterior.' 
+  : `Sua missão é ajudar o usuário com base na intenção atual: "${intent}".`}
+
+Contexto principal: ${JSON.stringify(dados)}
+Contexto extra: ${promptExtra}
+
+${sugestoesDeRespostas}
+
+Retorne SOMENTE a mensagem final para o usuário (sem JSON).
+`;
+
+  console.error('prompt Mensagem:', prompt);
+
+  try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: agent.personality },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3
+    });
+
+    return resposta.choices[0].message.content.trim();
+  } catch (error) {
+    console.error('❌ Erro ao gerar resposta da intent:', error);
+    return 'Desculpa, não consegui processar isso agora. Pode repetir?';
+  }
+}
+
+/**
+ * Detecta a nova intenção do usuário com base na conversa anterior.
+ */
+async function detectarIntentComContexto({
+  mensagem,
+  agentId = 'default-agent',
+  promptExtra = '',
+  intentAnterior = '',
+  mensagemAnterior = ''
+}) {
+  
+  console.log(`detectarIntentComContexto`);
+  const agent = loadAgent(agentId);
+  
+  const blocoDeIntents = gerarTodasAsIntentsPrompt();
+
+  const prompt = `
+Você é ${agent.nome}, um assistente da Ibiunet.
+
+Sua função é analisar a mensagem do cliente e detectar qual a intenção dele, com base nas opções disponíveis abaixo.
+
+**Regra importante sobre CPF**:
+- Só classifique como extrair_cpf se a mensagem contiver **um CPF válido com 11 dígitos numéricos** (com ou sem pontuação).
+- Se o usuário apenas mencionar "preciso enviar o CPF?" ou "vou mandar meu CPF", mas **não informar o número**, **não** use "extrair_cpf".
+- Nesses casos, **use a intent "aleatorio"**.
+
+Retorne no formato:
+{
+  "intent": "nome_da_intent"
+}
+
+Contexto:
+"${intentAnterior ? ' - Última intent:'+ intentAnterior : 'Primeira interação - Faça uma saldação'}"
+"${mensagemAnterior ? '- Última pergunta: ' + mensagemAnterior : ''}" '
+- Nova mensagem enviada pelo usuário: "${mensagem}"
+- Dados extras: ${JSON.stringify(promptExtra)}
+
+### Intents disponíveis:
+${blocoDeIntents}
+
+❗ Retorne APENAS o JSON. Se estiver em dúvida, use "aleatorio" não retonar nenhuma intent que não esteja na lista. Não retornar default.
+`;
+
+
+console.log(`prompt Intent`+prompt);
+  try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: agent.personality },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2
+    });
+
+    return JSON.parse(resposta.choices[0].message.content);
+  } catch (error) {
+    console.error('❌ Erro ao detectar intent:', error);
+    return { intent: 'aleatorio' };
+  }
+}
+
+/**
+ * Gera uma resposta com base nos filhos da intent atual.
+ */
+async function gerarMensagemDaIntent({
+  intent,
+  agentId = 'default-agent',
+  dados = {},
+  promptExtra = ''
+}) {
+  const agent = loadAgent(agentId);
+
+  const prompt = `
+Você é ${agent.nome}, sua função é ${agent.role} sua personalidade é  ${agent.personality} 
+
+${intent === 'aleatorio' ? 'Faça um small talk com a mensagem recebida (nova mensagem enviada dentro de Contexto Extra) do usuário e retome o assunto' : 'Sua missão é ajudar o usuário com base na intenção atual:'+ intent}'}
+
+Contexto PRINCIPAL: ${JSON.stringify(dados)}
+Contexto extra: ${promptExtra}
+
+Retorne SOMENTE a mensagem final para o usuário (sem JSON).
+`;
+
+
+
+// Baseie-se APENAS nas seguintes possibilidades de resposta (intents filhas do fluxo atual):
+
+// ${filhosPrompt}
+
+console.error('prompt Mensagem:', prompt);
+  try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: agent.personality },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3
+    });
+
+    return resposta.choices[0].message.content.trim();
+  } catch (error) {
+    console.error('❌ Erro ao gerar resposta da intent:', error);
+    return 'Desculpa, não consegui processar isso agora. Pode repetir?';
+  }
+}
 
 async function interpretarMensagem({
   mensagem,
@@ -65,7 +229,6 @@ ${promptExtra}
 
 1) "inicio"  
    - Quando o usuário inicia ou saúda.
-   - **Não** fazer saudação várias vezes na mesma conversa.
    - Exemplo de resposta (apenas uma vez): 
      {
        "intent": "inicio",
@@ -83,11 +246,11 @@ ${promptExtra}
        "mensagem": "Legal (Mostrar interesse sobre o que foi dito), mas primeiro eu vou precisar te identificar! Me mande seu CPF para a gente iniciar."
      }
 
-3) "informar_cpf"  
+3) "extrair_cpf"  
    - O usuário está informando o CPF. Ex:(522.473.726-51 ; 52247372651) deve conter 11 digitos menos que nova a intent deve ser considerada escolher_os
    - Exemplo:
      {
-       "intent": "informar_cpf",
+       "intent": "extrair_cpf",
        "data": {},
        "mensagem": "Ok, CPF recebido! Já vou verificar seus dados."
      }
@@ -144,24 +307,6 @@ ${promptExtra}
        "intent": "finalizado",
        "data": {},
        "mensagem": "Ótimo, encerramos por aqui. Obrigado pelo contato e até mais!"
-     }
-
-10) "help"
-   - O usuário pede ajuda ou não sabe como prosseguir.
-   - Exemplo:
-     {
-       "intent": "help",
-       "data": {},
-       "mensagem": "Posso te ajudar a informar seu CPF, verificar ou agendar uma OS. O que gostaria?"
-     }
-
-11) "desconhecido"
-   - Não foi possível classificar a mensagem.
-   - Exemplo:
-     {
-       "intent": "desconhecido",
-       "data": {},
-       "mensagem": "Não entendi bem. Poderia tentar reformular ou explicar melhor?"
      }
 
 12) "extrair_hora"  
@@ -389,10 +534,62 @@ Retorne APENAS o JSON, sem mais nada.
   }
 }
 
+
+async function interpretarNurmeroOS(mensagem ,OsList)  {
+
+  const prompt = `
+Você é um assistente que interpreta horários em linguagem natural e retorna sempre no seguinte formato JSON:
+
+{
+  "os": "156256626"
+}
+
+Tente identificar o horário mencionado pelo usuário com base na frase. Caso não encontre nenhuma hora válida, responda:
+
+{
+  "os": null
+}
+
+Frase do usuário: "${mensagem}"
+Ex de mensagem que o usuaário pode usar:
+-Quero a primeira ( Nesse caso devemos consultar a lista de OS Aberta )
+-123124124
+-Quero a segunda ( Nesse caso devemos consultar a lista de OS Aberta )
+
+
+OSs:
+"${OsList}"
+
+Retorne APENAS o JSON, sem mais nada.
+`;
+
+  try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'Você é um assistente que interpreta horários informais.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1
+    });
+
+    const json = JSON.parse(resposta.choices[0].message.content);
+    console.error('os:', json.hora_interpretada);
+    return json.hora_interpretada;
+  } catch (error) {
+    console.error('❌ Erro ao interpretar hora:', error);
+    return null;
+  }
+}
+
+
 module.exports = {
   interpretarMensagem,
   responderComBaseNaIntent,
   interpretarDataNatural,
   interpretaHora,
-  interpretaDataeHora
+  interpretaDataeHora,
+  detectarIntentComContexto,
+  gerarMensagemDaIntent,
+  interpretarNurmeroOS
 };
