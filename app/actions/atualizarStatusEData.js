@@ -32,12 +32,29 @@ module.exports = async ({ osId, novoStatus, novaData }) => {
     };
   }
 
+  // Buscar assunto/título da OS
+  const assunto = payload.titulo || payload.mensagem || payload.motivo || 'a visita';
+  // Buscar data/hora agendada
+  let dataHora = '';
+  const dataAgendada = payload.data_agenda_final || payload.novaData || novaData;
+  if (dataAgendada) {
+    const [data, hora] = String(dataAgendada).split(' ');
+    if (data && hora) {
+      dataHora = `Ficou para o dia ${require('dayjs')(data).format('DD/MM/YYYY')} às ${hora.slice(0,5)}`;
+    } else if (data) {
+      dataHora = `Ficou para o dia ${require('dayjs')(data).format('DD/MM/YYYY')}`;
+    }
+  }
+  const mensagem = dataHora
+    ? `Prontinho! Sua visita para ${assunto} está agendada! ${dataHora}.
+Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`
+    : `Prontinho! Sua OS ${osId} foi atualizada com sucesso. Caso precise de mim, estou por aqui.`;
   return {
-    mensagem: `✅ OS ${osId} atualizada com sucesso.`,
+    mensagem,
     data: resposta
   };
-};
 
+};
 
 // actions/agendar_os_completo.js
 const { buscarOS, atualizarOS } = require('../../services/ixcService');

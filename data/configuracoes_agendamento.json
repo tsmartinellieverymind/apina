@@ -1,0 +1,65 @@
+{
+  "assuntos": [
+    {
+      "id_assunto": "1",
+      "tipo": "I",
+      "descricao": "Instalação de internet fibra ótica",
+      "dataMinimaAgendamentoDias": 1,
+      "prazoMaximoAgendamentoDias": 10,
+      "prioridade": 0
+    },
+    {
+      "id_assunto": "2",
+      "tipo": "I",
+      "descricao": "Instalação de TV",
+      "dataMinimaAgendamentoDias": 2,
+      "prazoMaximoAgendamentoDias": 15,
+      "prioridade": 0
+    },
+    {
+      "id_assunto": "3",
+      "tipo": "I",
+      "descricao": "Instalação de telefonia",
+      "dataMinimaAgendamentoDias": 1,
+      "prazoMaximoAgendamentoDias": 12,
+      "prioridade": 0
+    },
+    {
+      "id_assunto": "4",
+      "tipo": "S",
+      "descricao": "Suporte técnico",
+      "dataMinimaAgendamentoDias": 0,
+      "prazoMaximoAgendamentoDias": 5,
+      "prioridade": 1
+    },
+    {
+      "id_assunto": "5",
+      "tipo": "R",
+      "descricao": "Reparo",
+      "dataMinimaAgendamentoDias": 0,
+      "prazoMaximoAgendamentoDias": 3,
+      "prioridade": 2
+    },
+    {
+      "id_assunto": "6",
+      "tipo": "M",
+      "descricao": "Manutenção preventiva",
+      "dataMinimaAgendamentoDias": 3,
+      "prazoMaximoAgendamentoDias": 20,
+      "prioridade": 1
+    },
+    {
+      "id_assunto": "7",
+      "tipo": "M",
+      "descricao": "Manutenção corretiva",
+      "dataMinimaAgendamentoDias": 0,
+      "prazoMaximoAgendamentoDias": 7,
+      "prioridade": 2
+    }
+  ],
+  "default": {
+    "dataMinimaAgendamentoDias": 1,
+    "prazoMaximoAgendamentoDias": 10,
+    "prioridade": 0
+  }
+}
