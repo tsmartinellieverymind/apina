@@ -78,25 +78,6 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
   }
 
   processarResposta();
-
-  // Resposta para SMS
-  if (smsBody) {
-    const twiml = new MessagingResponse();
-    twiml.message(resposta);
-    res.type('text/xml').send(twiml.toString());
-    return;
-  }
-
-  // Resposta para voz (retorna o mesmo texto)
-  if (voiceText) {
-    const twiml = new VoiceResponse();
-    twiml.say(resposta);
-    res.type('text/xml').send(twiml.toString());
-    return;
-  }
-
-  // Caso não seja reconhecido
-  res.status(400).send('Nenhuma mensagem ou voz recebida');
 });
 
 module.exports = router;

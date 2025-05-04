@@ -1,4 +1,5 @@
 const axios = require('axios');
+const FormData = require('form-data');
 require('dotenv').config();
 
 /**
@@ -26,7 +27,7 @@ async function baixarAudioTwilio(url) {
 async function transcreverAudioWhisper(audioBuffer, filename = 'audio.ogg') {
   const apiKey = process.env.OPENAI_API_KEY;
   const formData = new FormData();
-  formData.append('file', audioBuffer, filename);
+  formData.append('file', audioBuffer, { filename });
   formData.append('model', 'whisper-1');
 
   const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
