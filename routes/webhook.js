@@ -13,8 +13,8 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
   let smsBody = req.body.Body;
   let voiceText = req.body.SpeechResult;
   let params = null;
-  let audioUrl = undefined;
-  let audioType = undefined;
+  let audioUrl = req.body.MediaUrl0;
+  let audioType = req.body.MediaContentType0;
 
   if (req.body.Payload) {
     try {
@@ -24,8 +24,8 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
       if (params) {
         smsBody = params.Body;
         voiceText = params.SpeechResult;
-        audioUrl = params.MediaUrl0;
-        audioType = params.MediaContentType0;
+        audioUrl = params.MediaUrl0 || audioUrl;
+        audioType = params.MediaContentType0 || audioType;
       }
     } catch (e) {
       console.error('[Webhook Voz] Erro ao parsear Payload:', e);
