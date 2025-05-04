@@ -13,6 +13,8 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
   let smsBody = req.body.Body;
   let voiceText = req.body.SpeechResult;
   let params = null;
+  let audioUrl = undefined;
+  let audioType = undefined;
 
   if (req.body.Payload) {
     try {
@@ -22,6 +24,8 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
       if (params) {
         smsBody = params.Body;
         voiceText = params.SpeechResult;
+        audioUrl = params.MediaUrl0;
+        audioType = params.MediaContentType0;
       }
     } catch (e) {
       console.error('[Webhook Voz] Erro ao parsear Payload:', e);
@@ -30,9 +34,50 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
 
   console.log('[Webhook Voz] smsBody:', smsBody);
   console.log('[Webhook Voz] voiceText:', voiceText);
+  console.log('[Webhook Voz] audioUrl:', audioUrl);
+  console.log('[Webhook Voz] audioType:', audioType);
 
-  const resposta = smsBody || voiceText || 'Nada recebido';
-  console.log('[Webhook Voz] Recebido:', resposta);
+  let resposta = smsBody || voiceText;
+  const { baixarAudioTwilio, transcreverAudioWhisper } = require('../services/transcribeService');
+
+  async function processarResposta() {
+    if (!resposta && audioUrl) {
+      try {
+        console.log('[Webhook Voz] Baixando áudio do Twilio:', audioUrl);
+        const audioBuffer = await baixarAudioTwilio(audioUrl);
+        console.log('[Webhook Voz] Áudio baixado, enviando para transcrição...');
+        const textoTranscrito = await transcreverAudioWhisper(audioBuffer, 'audio.ogg');
+        resposta = textoTranscrito || '(Áudio recebido, mas não foi possível transcrever)';
+        console.log('[Webhook Voz] Texto transcrito:', resposta);
+      } catch (err) {
+        console.error('[Webhook Voz] Erro ao processar/transcrever áudio:', err.message);
+        resposta = 'Recebido áudio, mas não foi possível transcrever.';
+      }
+    }
+    resposta = resposta || 'Nada recebido';
+    console.log('[Webhook Voz] Recebido:', resposta);
+
+    // Resposta para SMS
+    if (smsBody) {
+      const twiml = new MessagingResponse();
+      twiml.message(resposta);
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
+    // Resposta para voz (retorna o mesmo texto)
+    if (voiceText || audioUrl) {
+      const twiml = new VoiceResponse();
+      twiml.say(resposta);
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
+    // Caso não seja reconhecido
+    res.status(400).send('Nenhuma mensagem ou voz recebida');
+  }
+
+  processarResposta();
 
   // Resposta para SMS
   if (smsBody) {
