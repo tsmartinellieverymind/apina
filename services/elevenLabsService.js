@@ -7,7 +7,7 @@ const { uploadToS3 } = require('./s3Service'); // Importa a função de upload d
 const apiKey = process.env.ELEVENLABS_API_KEY;
 const voiceId = '21m00Tcm4TlvDq8ikWAM'; // Exemplo: ID de voz padrão, ajuste se necessário
 const modelId = 'eleven_multilingual_v2'; // Modelo mais recente
-const outputDir = path.join(__dirname, '../app'); // Diretório para salvar temporariamente
+const outputDir = '/tmp'; // Usar diretório temporário padrão do sistema
 
 /**
  * Gera áudio usando a API ElevenLabs, faz upload para S3 e retorna a URL pública.
