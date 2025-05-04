@@ -1,7 +1,7 @@
 require('dotenv').config({ path: '../.env' }); // Garante que as variáveis de ambiente sejam carregadas
 const axios = require('axios');
 const fs = require('fs').promises;
-const path = path = require('path');
+const path = require('path'); // Corrigido
 const { uploadToS3 } = require('./s3Service'); // Importa a função de upload do s3Service
 
 const apiKey = process.env.ELEVENLABS_API_KEY;
