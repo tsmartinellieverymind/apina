@@ -9,10 +9,24 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Body:', JSON.stringify(req.body, null, 2));
 
-  // Para mensagens SMS
-  const smsBody = req.body.Body;
-  // Para chamadas de voz, o Twilio envia transcrição em SpeechResult
-  const voiceText = req.body.SpeechResult;
+  // Suporte para Payload aninhado (caso venha como string JSON)
+  let smsBody = req.body.Body;
+  let voiceText = req.body.SpeechResult;
+  let params = null;
+
+  if (req.body.Payload) {
+    try {
+      const payloadObj = JSON.parse(req.body.Payload);
+      params = payloadObj?.webhook?.request?.parameters;
+      console.log('[Webhook Voz] Payload parameters:', params);
+      if (params) {
+        smsBody = params.Body;
+        voiceText = params.SpeechResult;
+      }
+    } catch (e) {
+      console.error('[Webhook Voz] Erro ao parsear Payload:', e);
+    }
+  }
 
   console.log('[Webhook Voz] smsBody:', smsBody);
   console.log('[Webhook Voz] voiceText:', voiceText);
