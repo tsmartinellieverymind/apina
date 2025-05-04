@@ -4,10 +4,18 @@ const { twiml: { MessagingResponse, VoiceResponse } } = require('twilio');
 
 // Rota para receber mensagens de texto ou voz do Twilio
 router.post('/', express.urlencoded({ extended: false }), (req, res) => {
+  // Log the full request for debugging
+  console.log('--- [Webhook Voz] INCOMING REQUEST ---');
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body:', JSON.stringify(req.body, null, 2));
+
   // Para mensagens SMS
   const smsBody = req.body.Body;
   // Para chamadas de voz, o Twilio envia transcrição em SpeechResult
   const voiceText = req.body.SpeechResult;
+
+  console.log('[Webhook Voz] smsBody:', smsBody);
+  console.log('[Webhook Voz] voiceText:', voiceText);
 
   const resposta = smsBody || voiceText || 'Nada recebido';
   console.log('[Webhook Voz] Recebido:', resposta);
