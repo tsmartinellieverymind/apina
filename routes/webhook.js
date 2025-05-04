@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { twiml: { MessagingResponse, VoiceResponse } } = require('twilio');
+const { gerarAudioUrl } = require('../services/elevenLabsService'); 
+const { baixarAudioTwilio, transcreverAudioWhisper } = require('../services/transcribeService');
+const { enviarMensagemWhatsApp } = require('../services/twillioService'); 
 
 // Rota para receber mensagens de texto ou voz do Twilio
 router.post('/', express.urlencoded({ extended: false }), (req, res) => {
@@ -37,34 +40,49 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
   console.log('[Webhook Voz] audioUrl:', audioUrl);
   console.log('[Webhook Voz] audioType:', audioType);
 
-  let resposta = smsBody || voiceText;
-  const { baixarAudioTwilio, transcreverAudioWhisper } = require('../services/transcribeService');
+  let textoResposta = smsBody || voiceText;
 
   async function processarResposta() {
-    if (!resposta && audioUrl) {
+    if (!textoResposta && audioUrl) {
       try {
         console.log('[Webhook Voz] Baixando áudio do Twilio:', audioUrl);
         const audioBuffer = await baixarAudioTwilio(audioUrl);
         console.log('[Webhook Voz] Áudio baixado, enviando para transcrição...');
         const textoTranscrito = await transcreverAudioWhisper(audioBuffer, 'audio.ogg');
-        resposta = textoTranscrito || '(Áudio recebido, mas não foi possível transcrever)';
-        console.log('[Webhook Voz] Texto transcrito:', resposta);
+        textoResposta = textoTranscrito || '(Áudio recebido, mas não foi possível transcrever)';
+        console.log('[Webhook Voz] Texto transcrito:', textoResposta);
       } catch (err) {
         console.error('[Webhook Voz] Erro ao processar/transcrever áudio:', err.message);
-        resposta = 'Recebido áudio, mas não foi possível transcrever.';
+        textoResposta = 'Recebi um áudio, mas ocorreu um erro ao tentar processá-lo.';
       }
     }
-    resposta = resposta || 'Nada recebido';
-    console.log('[Webhook Voz] Recebido:', resposta);
+    textoResposta = textoResposta || 'Não entendi o que você disse ou enviou.';
+    console.log('[Webhook Voz] Texto para gerar áudio:', textoResposta);
 
-    // Envia a resposta via WhatsApp usando o twillioService
+    // Envia a resposta como ÁUDIO via WhatsApp
+    let urlAudioResposta = null;
     try {
-      const { enviarMensagemWhatsApp } = require('../services/twillioService');
+        console.log('[Webhook Voz] Gerando áudio da resposta...');
+        urlAudioResposta = await gerarAudioUrl(textoResposta);
+        console.log(`[Webhook Voz] Áudio da resposta gerado: ${urlAudioResposta}`);
+    } catch (err) {
+        console.error('[Webhook Voz] Erro ao gerar áudio da resposta:', err);
+        // Se falhar em gerar áudio, envia texto como fallback
+        urlAudioResposta = null; 
+    }
+    
+    try {
       const destinatario = params?.From || req.body.From;
       if (destinatario) {
-        await enviarMensagemWhatsApp(destinatario, resposta);
-        console.log(`[Webhook Voz] Mensagem enviada para ${destinatario}: ${resposta}`);
-        res.status(200).json({ status: 'ok', destinatario, resposta });
+        let mensagemFinal;
+        if (urlAudioResposta) {
+            mensagemFinal = `Ouça a resposta: ${urlAudioResposta}`;
+        } else {
+            mensagemFinal = `Desculpe, houve um erro ao gerar o áudio. A resposta seria: ${textoResposta}`;
+        }
+        await enviarMensagemWhatsApp(destinatario, mensagemFinal);
+        console.log(`[Webhook Voz] Mensagem enviada para ${destinatario}: ${mensagemFinal}`);
+        res.status(200).json({ status: 'ok', destinatario, respostaEnviada: mensagemFinal }); 
       } else {
         console.error('[Webhook Voz] Não foi possível identificar o destinatário para resposta WhatsApp.');
         res.status(400).json({ status: 'erro', msg: 'Destinatário não encontrado' });
