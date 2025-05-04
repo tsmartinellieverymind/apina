@@ -29,6 +29,7 @@ async function transcreverAudioWhisper(audioBuffer, filename = 'audio.ogg') {
   const formData = new FormData();
   formData.append('file', audioBuffer, { filename });
   formData.append('model', 'whisper-1');
+  formData.append('language', 'pt');
 
   const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
     headers: {

@@ -57,24 +57,22 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
     resposta = resposta || 'Nada recebido';
     console.log('[Webhook Voz] Recebido:', resposta);
 
-    // Resposta para SMS
-    if (smsBody) {
-      const twiml = new MessagingResponse();
-      twiml.message(resposta);
-      res.type('text/xml').send(twiml.toString());
-      return;
+    // Envia a resposta via WhatsApp usando o twillioService
+    try {
+      const { enviarMensagemWhatsApp } = require('../services/twillioService');
+      const destinatario = params?.From || req.body.From;
+      if (destinatario) {
+        await enviarMensagemWhatsApp(destinatario, resposta);
+        console.log(`[Webhook Voz] Mensagem enviada para ${destinatario}: ${resposta}`);
+        res.status(200).json({ status: 'ok', destinatario, resposta });
+      } else {
+        console.error('[Webhook Voz] Não foi possível identificar o destinatário para resposta WhatsApp.');
+        res.status(400).json({ status: 'erro', msg: 'Destinatário não encontrado' });
+      }
+    } catch (err) {
+      console.error('[Webhook Voz] Erro ao enviar mensagem WhatsApp:', err);
+      res.status(500).json({ status: 'erro', msg: 'Falha ao enviar mensagem WhatsApp' });
     }
-
-    // Resposta para voz (retorna o mesmo texto)
-    if (voiceText || audioUrl) {
-      const twiml = new VoiceResponse();
-      twiml.say(resposta);
-      res.type('text/xml').send(twiml.toString());
-      return;
-    }
-
-    // Caso não seja reconhecido
-    res.status(400).send('Nenhuma mensagem ou voz recebida');
   }
 
   processarResposta();
