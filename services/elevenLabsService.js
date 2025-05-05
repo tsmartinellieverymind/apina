@@ -52,28 +52,47 @@ async function gerarAudioUrl(texto) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `audio-${timestamp}.mp3`;
     
-    // Não salva mais localmente, envia direto
-    // const localFilePath = path.join(outputDir, fileName);
-    // await fs.writeFile(localFilePath, audioBuffer);
-    // console.log(`[ElevenLabs] Áudio salvo localmente: ${localFilePath}`);
-
     console.log(`[ElevenLabs] Enviando áudio (${fileName}) para S3...`);
     const s3Url = await uploadToS3(fileName, audioBuffer);
     console.log(`[ElevenLabs] Áudio disponível em: ${s3Url}`);
     return s3Url;
 
   } catch (error) {
-    console.error('[ElevenLabs] Erro ao gerar ou fazer upload do áudio:', error.response ? error.response.data : error.message);
-    // Tenta decodificar a resposta de erro se for JSON
-    if (error.response && error.response.data instanceof ArrayBuffer) {
-      try {
-        const errorJson = JSON.parse(Buffer.from(error.response.data).toString('utf-8'));
-        console.error('[ElevenLabs] Detalhes do erro (API):', errorJson);
-      } catch (parseError) {
-        // Não era JSON
+    let errorMessage = 'Falha ao gerar ou fazer upload do áudio do ElevenLabs.';
+    // Verifica se é um erro da API (Axios)
+    if (error.response) {
+      console.error('[ElevenLabs] Erro da API:', error.response.status, error.response.data);
+      // Tenta extrair uma mensagem mais específica do detalhe do erro
+      if (error.response.data && error.response.data.detail && error.response.data.detail.message) {
+        errorMessage = `Erro da API ElevenLabs: ${error.response.data.detail.message}`;
+      } else if (error.response.data && error.response.data.detail && error.response.data.detail.status) {
+          errorMessage = `Erro da API ElevenLabs: ${error.response.data.detail.status}`;
+      } else {
+         // Se não conseguir extrair, loga o buffer como antes para debug, mas não o usa na mensagem final
+         console.error('[ElevenLabs] Resposta de erro da API (Buffer/JSON):', error.response.data);
       }
+    } else {
+      // Outros erros (rede, sistema de arquivos ANTES do upload, etc.)
+      console.error('[ElevenLabs] Erro inesperado:', error.message);
+      errorMessage = `Erro inesperado no processo de áudio: ${error.message}`;
     }
-    throw new Error('Falha ao gerar ou fazer upload do áudio do ElevenLabs.');
+
+    // Limpa o arquivo temporário se ele existir e ocorreu erro ANTES do upload
+    const tempFilePath = path.join(outputDir, `audio-error-${Date.now()}.mp3`);
+    try {
+      if (await fs.stat(tempFilePath)) {
+         await fs.unlink(tempFilePath);
+         console.log('[ElevenLabs] Arquivo temporário de erro removido:', tempFilePath);
+      }
+    } catch (cleanupError) {
+       // Ignora erros ao limpar, o erro principal já ocorreu
+       if (cleanupError.code !== 'ENOENT') {
+           console.warn('[ElevenLabs] Aviso ao tentar limpar arquivo temporário após erro:', cleanupError.message);
+       }
+    }
+    
+    // Propaga um erro mais claro
+    throw new Error(errorMessage);
   }
 }
 
