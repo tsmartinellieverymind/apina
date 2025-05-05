@@ -7,19 +7,28 @@ const authToken = process.env.TWILIO_API_TOKEN;
 const client = twilio(accountSid, authToken);
 
 // Função para enviar mensagem via Twilio
-async function enviarMensagemWhatsApp(to, mensagem) {
+// Agora aceita um único objeto 'messageData' com as propriedades necessárias
+async function enviarMensagemWhatsApp(messageData) {
 
-  console.log(`✅ Mensagem Enviada pelo GPT : `  + mensagem);
+  // Log condicional baseado no tipo de mensagem (texto ou mídia)
+  if (messageData.body) {
+    console.log(`➡️  Preparando envio de TEXTO para ${messageData.to}: ${messageData.body}`);
+  } else if (messageData.mediaUrl && messageData.mediaUrl.length > 0) {
+    console.log(`➡️  Preparando envio de MÍDIA para ${messageData.to}: ${messageData.mediaUrl[0]}`);
+  } else {
+    console.warn(`⚠️ Tentativa de envio para ${messageData.to} sem body ou mediaUrl.`);
+    throw new Error('Mensagem para Twilio deve conter body ou mediaUrl.');
+  }
   
   try {
+    // Cria a mensagem usando as propriedades do objeto messageData
+    // Inclui 'to', 'from', 'body' OU 'mediaUrl'
     const message = await client.messages.create({
-      body: mensagem,
-      from: 'whatsapp:+14155238886',
-      to,
-      httpAgent: httpsAgent // usa o agent customizado aqui
+      ...messageData, // Espalha as propriedades (to, from, body?, mediaUrl?)
+      httpAgent: httpsAgent // Mantém o agent customizado
     });
 
-    console.log(`✅ Mensagem enviada para ${to}. SID: ${message.sid}`);
+    console.log(`✅ Mensagem enviada para ${messageData.to}. SID: ${message.sid}`);
     return message.sid;
 
   } catch (error) {
