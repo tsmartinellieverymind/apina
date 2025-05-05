@@ -17,12 +17,14 @@ async function gerarAudioUrl(texto) {
   const fileName = `audio-${timestamp}.mp3`;
   const outputPath = path.join(outputDir, fileName);
 
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`;
   const headers = {
     'Accept': 'audio/mpeg',
     'Content-Type': 'application/json',
     'xi-api-key': apiKey,
+    'User-Agent': 'MyVoiceBot/1.0 (https://meusite.com)', // IMPORTANTE para evitar bloqueio por atividade suspeita
   };
+
   const data = {
     text: texto,
     model_id: modelId,
@@ -34,7 +36,10 @@ async function gerarAudioUrl(texto) {
 
   try {
     console.log('[ElevenLabs] Solicitando áudio...');
-    const response = await axios.post(url, data, { headers, responseType: 'arraybuffer' });
+    const response = await axios.post(url, data, {
+      headers,
+      responseType: 'arraybuffer'
+    });
 
     if (response.status !== 200) {
       throw new Error(`Erro ${response.status}: ${response.statusText}`);
