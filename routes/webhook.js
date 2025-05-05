@@ -5,12 +5,26 @@ const { gerarAudioUrl } = require('../services/elevenLabsService');
 const { baixarAudioTwilio, transcreverAudioWhisper } = require('../services/transcribeService');
 const { enviarMensagemWhatsApp } = require('../services/twillioService'); 
 
+// Pega o número do WhatsApp do Twilio do ambiente
+const twilioWhatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+if (!twilioWhatsappNumber) {
+  console.error('❌ ERRO FATAL: Variável de ambiente TWILIO_WHATSAPP_NUMBER não definida!');
+  // Em um cenário real, você poderia querer que a aplicação parasse aqui
+  // process.exit(1);
+}
+
 // Rota para receber mensagens de texto ou voz do Twilio
-router.post('/', express.urlencoded({ extended: false }), (req, res) => {
-  // Log the full request for debugging
+router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
+  // Log da requisição completa para depuração
   console.log('--- [Webhook Voz] INCOMING REQUEST ---');
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Body:', JSON.stringify(req.body, null, 2));
+
+  // IGNORAR WEBHOOKS DE STATUS/ERRO DA TWILIO
+  if (req.body.Level === 'ERROR' || req.body.MessageStatus || req.body.SmsStatus) {
+    console.log('[Webhook Voz] Ignorando webhook de status/erro da Twilio.');
+    return res.status(200).send('Webhook de status/erro recebido e ignorado.');
+  }
 
   // Suporte para Payload aninhado (caso venha como string JSON)
   let smsBody = req.body.Body;
@@ -73,38 +87,42 @@ router.post('/', express.urlencoded({ extended: false }), (req, res) => {
     
     try {
       const destinatario = params?.From || req.body.From;
-      if (destinatario) {
-        let messageData = {
-          to: destinatario, 
-          from: 'seu_numero_twilio_whatsapp' // Seu número Twilio WhatsApp
-        };
-
-        if (urlAudioResposta) {
-          // Se temos URL de áudio, enviamos como mídia
-          messageData.mediaUrl = [urlAudioResposta]; 
-          console.log(`[Webhook Voz] Preparando para enviar ÁUDIO para ${destinatario} (URL: ${urlAudioResposta})`);
-        } else {
-          // Se não temos URL, enviamos a mensagem de texto
-          messageData.body = textoResposta;
-          console.log(`[Webhook Voz] Preparando para enviar TEXTO para ${destinatario}: ${textoResposta}`);
-        }
-
-        // Chama a função de envio com os dados montados
-        const messageSid = await enviarMensagemWhatsApp(messageData);
-
-        console.log(`✅ Mensagem enviada para ${destinatario}. SID: ${messageSid}`);
-        res.status(200).json({ 
-          status: 'ok', 
-          destinatario: destinatario, 
-          respostaEnviada: urlAudioResposta ? `Audio URL: ${urlAudioResposta}` : textoResposta 
-        });
-      } else {
-        console.error('[Webhook Voz] Não foi possível identificar o destinatário para resposta WhatsApp.');
-        res.status(400).json({ status: 'erro', msg: 'Destinatário não encontrado' });
+      if (!destinatario) {
+        console.error('[Webhook Voz] Não foi possível identificar o destinatário para resposta WhatsApp a partir de req.body.From.');
+        // Responde ao Twilio, mas indica o erro interno
+        return res.status(400).json({ status: 'erro', msg: 'Destinatário não encontrado na requisição original.' });
       }
-    } catch (err) {
-      console.error('[Webhook Voz] Erro ao enviar mensagem WhatsApp:', err);
-      res.status(500).json({ status: 'erro', msg: 'Falha ao enviar mensagem WhatsApp' });
+
+      let messageData = {
+        to: destinatario, 
+        from: twilioWhatsappNumber // Usa o número correto do .env
+      };
+
+      if (urlAudioResposta) {
+        // Se temos URL de áudio, enviamos como mídia
+        messageData.mediaUrl = [urlAudioResposta]; 
+        console.log(`[Webhook Voz] Preparando para enviar ÁUDIO para ${destinatario} (URL: ${urlAudioResposta})`);
+      } else {
+        // Se não temos URL, enviamos a mensagem de texto
+        messageData.body = textoResposta;
+        console.log(`[Webhook Voz] Preparando para enviar TEXTO para ${destinatario}: ${textoResposta}`);
+      }
+
+      // Chama a função de envio com os dados montados
+      const messageSid = await enviarMensagemWhatsApp(messageData);
+
+      console.log(`✅ Mensagem enviada para ${destinatario}. SID: ${messageSid}`);
+      res.status(200).json({ 
+        status: 'ok', 
+        destinatario: destinatario, 
+        respostaEnviada: urlAudioResposta ? `Audio URL: ${urlAudioResposta}` : textoResposta 
+      });
+    } catch (sendError) {
+      console.error(`❌ Falha ao enviar mensagem para ${destinatario}:`, sendError);
+      // Nota: Não podemos mais enviar uma resposta JSON aqui se o envio falhou,
+      // pois a resposta para o webhook original da Twilio já pode ter sido enviada
+      // ou o Twilio pode não esperar mais uma resposta.
+      // Apenas logamos o erro no servidor.
     }
   }
 
