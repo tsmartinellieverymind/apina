@@ -137,6 +137,20 @@ const promptMap = {
     "exemplo_resposta": "Sem problemas! Vamos escolher uma nova ordem de serviço para agendar. Por favor, me diga qual OS você deseja e depois selecione uma nova data para o agendamento."
   }`,
 
+  alterar_periodo: `{
+    "intent": "alterar_periodo",
+    "descricao": "Quando o usuário aceita a data sugerida, mas deseja alterar apenas o período (manhã/tarde).",
+    "exemplos_usuario": [
+      "pode ser nesse dia mas pela manhã",
+      "quero no mesmo dia mas à tarde",
+      "a data está boa, mas prefiro de manhã",
+      "sim, mas no período da manhã",
+      "concordo com o dia, mas quero mudar para o período da tarde",
+      "o dia está bom, só muda para o período da manhã"
+    ],
+    "exemplo_resposta": "Entendi! Vou verificar a disponibilidade para o mesmo dia, mas no período que você prefere."
+  }`,
+
   listar_opcoes: `{
     "intent": "listar_opcoes",
     "descricao": "Quando o usuário pede para ver novamente as opções disponíveis de datas para agendamento ou de ordens de serviço (OS).",

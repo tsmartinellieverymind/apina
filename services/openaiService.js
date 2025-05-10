@@ -663,6 +663,6 @@ module.exports = {
   detectarIntentComContexto,
   gerarMensagemDaIntent,
   interpretarNumeroOS,
-  interpretarEscolhaOS
-  
+  interpretarEscolhaOS,
+  interpretaDataePeriodo
 };

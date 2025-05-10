@@ -153,10 +153,46 @@ function getConfiguracoesAgendamentoOS(os) {
   };
 }
 
+/**
+ * Retorna os vínculos entre técnicos e setores
+ * @returns {Array} Lista de vínculos entre técnicos e setores
+ */
+function vinculosTecnicoSetor() {
+  try {
+    // Tentar carregar do caminho relativo ao diretório services
+    const vinculosPath = path.join(__dirname, '../data/vinculos_tecnicos_setores.json');
+    if (fs.existsSync(vinculosPath)) {
+      return JSON.parse(fs.readFileSync(vinculosPath, 'utf8'));
+    }
+    
+    // Se não encontrar o arquivo, retorna uma lista padrão de vínculos
+    return [
+      { id_tecnico: 1, id_setor: 1, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 1, id_setor: 2, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 1, id_setor: 3, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 1, id_setor: 4, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 2, id_setor: 1, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 2, id_setor: 4, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 3, id_setor: 2, ativo: true, funcao: 'Técnico' },
+      { id_tecnico: 3, id_setor: 3, ativo: true, funcao: 'Técnico' }
+    ];
+  } catch (error) {
+    console.error('Erro ao carregar vínculos de técnicos com setores:', error.message);
+    // Retorna uma lista vazia em caso de erro
+    return [];
+  }
+  
+}
+
+// Executar a função vinculosTecnicoSetor e armazenar o resultado
+const vinculosTecnicoSetorResult = vinculosTecnicoSetor();
+
 module.exports = {
   getConfiguracaoAgendamento,
   getDataMinimaAgendamento,
   getDataMaximaAgendamento,
   getPrioridadeAgendamento,
-  getConfiguracoesAgendamentoOS
+  getConfiguracoesAgendamentoOS,
+  // Exportar o resultado da função em vez da função em si
+  vinculosTecnicoSetor: vinculosTecnicoSetorResult
 };

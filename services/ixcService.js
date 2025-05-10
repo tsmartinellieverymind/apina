@@ -3,8 +3,11 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const dayjs = require('dayjs');
+// Importar e registrar o plugin isBetween para dayjs
+const isBetweenPlugin = require('dayjs/plugin/isBetween');
+dayjs.extend(isBetweenPlugin);
 const { isDiaUtil, getProximoDiaUtil, getFeriadosNacionais } = require('./ixcUtilsData');
-//const configuracoesAgendamento = require('./configuracoes_agendamentos');
+const configuracoesAgendamento = require('./configuracoes_agendamentos');
 //const { getConfig } = require('../config/config');
 require('dotenv').config(); // carrega as variáveis do .env
 
@@ -68,14 +71,18 @@ async function buscarOSPorClienteId(clienteId) {
 
 async function atualizarOS(osId, payloadOriginal) {
   const payload = { ...payloadOriginal };
+  
+  // TEMPORÁRIO: Definir ID do técnico como 2 para testes
+  payload.id_tecnico = 2;
 
   const limparCampos = [
     'data_hora_analise', 'data_hora_encaminhado', 'data_hora_assumido', 'data_hora_execucao',
     'data_agenda_final', 'status_sla', 'melhor_horario_agenda', 'origem_os_aberta', 'protocolo',
     'complemento', 'bloco', 'latitude', 'apartamento', 'longitude', 'bairro', 'referencia',
-    'impresso', 'data_final', 'data_prazo_limite', 'data_reservada', 'justificativa_sla_atrasado',
+    'impresso', 'data_prazo_limite', 'data_reservada', 'justificativa_sla_atrasado',
     'origem_endereco_estrutura', 'data_reagendar', 'data_prev_final', 'origem_cadastro'
   ];
+  // Removido 'data_final' da lista de campos a serem limpos para garantir que ele seja enviado corretamente
 
   limparCampos.forEach((campo) => {
     if (
@@ -86,6 +93,25 @@ async function atualizarOS(osId, payloadOriginal) {
       payload[campo] = '';
     }
   });
+  
+  // Garantir que os campos de data estejam corretamente definidos
+  if (payload.data_agenda_final && payload.data_agenda_final !== '0000-00-00 00:00:00' && payload.data_agenda_final !== '') {
+    // Armazenar a data original de agendamento
+    const dataOriginal = payload.data_agenda_final;
+    const dataAgendaObj = dayjs(dataOriginal);
+    
+    // Definir data_inicio como a data e hora original do agendamento
+    payload.data_inicio = dataAgendaObj.format('YYYY-MM-DD HH:mm:ss');
+    console.log(`Definindo data_inicio: ${payload.data_inicio}`);
+    
+    // Definir data_agenda_final como 4 horas depois da data_inicio (requisito do sistema)
+    payload.data_agenda_final = dataAgendaObj.add(4, 'hour').format('YYYY-MM-DD HH:mm:ss');
+    console.log(`Ajustando data_agenda_final: ${payload.data_agenda_final} (4h após data_inicio)`);
+    
+    // Definir data_final igual a data_agenda_final para garantir consistência
+    payload.data_final = payload.data_agenda_final;
+    console.log(`Definindo data_final: ${payload.data_final}`);
+  }
 
   // const removerCampos = ['idx', 'preview', 'id_tecnico', 'id', 'id_condominio'];
   const removerCampos = ['idx', 'preview', 'id', 'id_condominio'];
@@ -109,19 +135,46 @@ async function atualizarOS(osId, payloadOriginal) {
 
   // Buscar assunto/título da OS
   const assunto = payload.titulo || payload.mensagem || payload.motivo || 'a visita';
-  // Buscar data/hora agendada
-  let dataHora = '';
+  
+  // Buscar data e período agendados
+  let dataFormatada = '';
+  let periodoTexto = '';
+  let diaSemana = '';
+  
   if (payload.data_agenda_final) {
-    const [data, hora] = payload.data_agenda_final.split(' ');
-    if (data && hora) {
-      dataHora = `Ficou para o dia ${dayjs(data).format('DD/MM/YYYY')} às ${hora.slice(0,5)}`;
-    } else if (data) {
-      dataHora = `Ficou para o dia ${dayjs(data).format('DD/MM/YYYY')}`;
+    const [data] = payload.data_agenda_final.split(' ');
+    if (data) {
+      const dataObj = dayjs(data);
+      dataFormatada = dataObj.format('DD/MM/YYYY');
+      
+      // Obter dia da semana
+      const { diaDaSemanaExtenso } = require('../app/utils/dateHelpers');
+      diaSemana = diaDaSemanaExtenso(data);
+      // Capitalizar primeira letra
+      diaSemana = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1);
+      
+      // Verificar período (manhã/tarde)
+      if (payload.melhor_horario_agenda) {
+        periodoTexto = payload.melhor_horario_agenda === 'M' ? 'manhã' : 'tarde';
+      }
     }
   }
-  const mensagem = dataHora
-    ? `Prontinho! Sua visita para ${assunto} está agendada! ${dataHora}.\nEstou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`
-    : `Prontinho! Sua OS ${osId} foi atualizada com sucesso. Caso precise de mim, estou por aqui.`;
+  
+  // Construir mensagem amigável e detalhada
+  let mensagem;
+  if (dataFormatada) {
+    if (periodoTexto) {
+      mensagem = `Prontinho! Sua visita para ${assunto} está agendada! ` +
+                `Ficou para ${diaSemana}, dia ${dataFormatada}, no período da ${periodoTexto}. ` +
+                `Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
+    } else {
+      mensagem = `Prontinho! Sua visita para ${assunto} está agendada! ` +
+                `Ficou para ${diaSemana}, dia ${dataFormatada}. ` +
+                `Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
+    }
+  } else {
+    mensagem = `Prontinho! Sua OS ${osId} foi atualizada com sucesso. Caso precise de mim, estou por aqui.`;
+  }
   return {
     mensagem,
     data: response.data
@@ -212,8 +265,11 @@ async function buscarClientePorCpf(cpf) {
  * @param {string} dataMaxima - Data máxima para agendamento (formato YYYY-MM-DD, opcional)
  * @returns {Promise<Object>} Objeto com sugestão principal e alternativas
  */
-async function gerarSugestoesDeAgendamento(os) {
+async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
+  const { dataEspecifica, periodoEspecifico } = opcoes;
   console.log('====[ gerarSugestoesDeAgendamento ]====');
+  console.log('[LOG] Opções recebidas:', opcoes);
+  console.log('[LOG] Objeto OS recebido:', JSON.stringify(os, null, 2));
   // Removed log referencing prioridade before it's defined
 
   // Encontrar configuração para o assunto da OS
@@ -231,27 +287,47 @@ async function gerarSugestoesDeAgendamento(os) {
   const diasMin = config.dataMinimaAgendamentoDias;
   const diasMax = config.prazoMaximoAgendamentoDias;
 
+  console.log('[LOG] prioridade:', prioridade);
+  console.log('[LOG] diasMin:', diasMin);
+  console.log('[LOG] diasMax:', diasMax);
+ 
   // Calcular data mínima
-  let dataMinimaObj = dayjs(); // Começa de hoje
-  if (diasMin > 0) {
-      dataMinimaObj = dataMinimaObj.add(diasMin, 'day');
-  }
-  // Garante que a data mínima seja um dia útil
-  while (!isDiaUtil(dataMinimaObj)) {
-      dataMinimaObj = dataMinimaObj.add(1, 'day');
+  let dataMinimaObj;
+  
+  // Se foi especificada uma data, usar essa data como mínima
+  if (dataEspecifica && dayjs(dataEspecifica).isValid()) {
+    dataMinimaObj = dayjs(dataEspecifica);
+    console.log(`[INFO] Usando data específica como mínima: ${dataMinimaObj.format('DD/MM/YYYY')}`);
+  } else {
+    dataMinimaObj = dayjs(); // Começa de hoje
+    if (diasMin > 0) {
+        dataMinimaObj = dataMinimaObj.add(diasMin, 'day');
+    }
+    // Garante que a data mínima seja um dia útil
+    while (!isDiaUtil(dataMinimaObj)) {
+        dataMinimaObj = dataMinimaObj.add(1, 'day');
+    }
   }
 
   // Calcular data máxima
-  let dataBaseParaMaxima = os.data_abertura ? dayjs(os.data_abertura) : dayjs();
-  let dataMaximaObj = dataBaseParaMaxima; // Começa da data base
-  let diasUteisContados = 0;
+  let dataMaximaObj;
+  
+  // Se foi especificada uma data, usar essa data como máxima também
+  if (dataEspecifica && dayjs(dataEspecifica).isValid()) {
+    dataMaximaObj = dayjs(dataEspecifica);
+    console.log(`[INFO] Usando data específica como máxima: ${dataMaximaObj.format('DD/MM/YYYY')}`);
+  } else {
+    let dataBaseParaMaxima = os.data_abertura ? dayjs(os.data_abertura) : dayjs();
+    dataMaximaObj = dataBaseParaMaxima; // Começa da data base
+    let diasUteisContados = 0;
 
-  // Adiciona 'diasMax' dias úteis à data base
-  while (diasUteisContados < diasMax) {
-      dataMaximaObj = dataMaximaObj.add(1, 'day');
-      if (isDiaUtil(dataMaximaObj)) {
-          diasUteisContados++;
-      }
+    // Adiciona 'diasMax' dias úteis à data base
+    while (diasUteisContados < diasMax) {
+        dataMaximaObj = dataMaximaObj.add(1, 'day');
+        if (isDiaUtil(dataMaximaObj)) {
+            diasUteisContados++;
+        }
+    }
   }
 
   // Garante que a data máxima seja pelo menos um dia útil após a data mínima
@@ -263,11 +339,12 @@ async function gerarSugestoesDeAgendamento(os) {
 
   console.log(`OS ID: ${os.id}, Assunto: ${idAssunto}, Setor: ${os.setor}`);
   console.log(`Config encontrada: Prioridade=${prioridade}, MinDias=${diasMin}, MaxDias=${diasMax}`);
+  console.log(`[LOG] Datas para análise: mínima=${dataMinimaObj.format('YYYY-MM-DD')}, máxima=${dataMaximaObj.format('YYYY-MM-DD')}`);
   console.log(`Data mínima calculada: ${dataMinimaObj.format('DD/MM/YYYY')}`);
   console.log(`Data máxima calculada: ${dataMaximaObj.format('DD/MM/YYYY')}`);
 
   const periodos = ['M', 'T']; // M = manhã, T = tarde
-  const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor(); // Carregar vínculos aqui
+  const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor; // Carregar vínculos aqui (já é o resultado da função)
   
   // Carregar vínculos de técnicos com setores
   // const vinculos = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/vinculos_tecnicos_setores.json'), 'utf8'));
@@ -300,6 +377,9 @@ async function gerarSugestoesDeAgendamento(os) {
       // o.id_tecnico
     );
     console.log('[1] Total de OS agendadas consideradas:', osAgendadas.length);
+    osAgendadas.forEach(o => {
+      console.log(`[1.1] OS ${o.id} - Técnico: ${o.id_tecnico}, Data: ${o.data_agenda_final}, Período: ${o.melhor_horario_agenda}`);
+    });
 
     // 3. Montar períodos ocupados por técnico e data
     const ocupadosPorTecnico = {};
@@ -315,6 +395,11 @@ async function gerarSugestoesDeAgendamento(os) {
     }
     
     console.log('[3] Mapeamento de ocupação por técnico concluído');
+    Object.entries(ocupadosPorTecnico).forEach(([tec, datas]) => {
+      Object.entries(datas).forEach(([data, periodos]) => {
+        console.log(`[3.1] Técnico ${tec} - ${data}: manhã=${periodos.M}, tarde=${periodos.T}`);
+      });
+    });
 
     // 4. Buscar todos os técnicos ativos (id_funcao=2) na API e filtrar pelo vínculo com o setor da OS
     const bodyTec = new URLSearchParams();
@@ -366,6 +451,7 @@ async function gerarSugestoesDeAgendamento(os) {
             }
           }
           if (periodosDisponiveis.length > 0) {
+            console.log(`[5.1] Técnico ${idTec} - Data ${dataStr} disponível nos períodos: ${periodosDisponiveis.join(', ')}`);
             datasDisponiveis.push({ data: dataStr, periodos: periodosDisponiveis });
           }
         }
@@ -387,8 +473,11 @@ async function gerarSugestoesDeAgendamento(os) {
         return dataA.diff(dataB);
       });
       
-      // Priorizar período preferido da OS
-      const periodoPreferido = os.melhor_horario_agenda || 'M';
+      // Priorizar período específico (se fornecido) ou o período preferido da OS
+      const periodoPreferido = periodoEspecifico || os.melhor_horario_agenda || 'M';
+      console.log(`[INFO] Período preferido: ${periodoPreferido}`);
+      
+      // Filtrar alternativas que incluem o período preferido
       const alternativasPreferidas = alternativas.filter(a => a.datasDisponiveis[0].periodos.includes(periodoPreferido));
       const listaFinal = alternativasPreferidas.length > 0 ? alternativasPreferidas : alternativas;
       
@@ -413,7 +502,7 @@ async function gerarSugestoesDeAgendamento(os) {
     let sugestaoFormatada = null;
     if (sugestao) {
       const dataDisponivel = sugestao.datasDisponiveis[0];
-      const periodoPreferido = os.melhor_horario_agenda || 'M';
+      const periodoPreferido = periodoEspecifico || os.melhor_horario_agenda || 'M';
       const periodo = dataDisponivel.periodos.includes(periodoPreferido) ? periodoPreferido : dataDisponivel.periodos[0];
       
       sugestaoFormatada = {
@@ -481,6 +570,12 @@ async function gerarSugestoesDeAgendamento(os) {
  * @returns {Promise<Object>} Resultado da verificação
  */
 async function verificarDisponibilidadeData(os, dataDesejada, periodoDesejado, dataMinima = null, prazoMaximoDias = null, dataMaxima = null) {
+  console.log('====[ verificarDisponibilidadeData ]====');
+  console.log(`[LOG] OS recebida:`, JSON.stringify(os, null, 2));
+  console.log(`[LOG] Data desejada: ${dataDesejada}, Período desejado: ${periodoDesejado}`);
+  if (dataMinima) console.log(`[LOG] Data mínima recebida: ${dataMinima}`);
+  if (dataMaxima) console.log(`[LOG] Data máxima recebida: ${dataMaxima}`);
+  if (prazoMaximoDias) console.log(`[LOG] Prazo máximo dias recebido: ${prazoMaximoDias}`);
   console.log(`Verificando disponibilidade para ${dataDesejada} - Período: ${periodoDesejado}`);
   
   // Verificar se a data é válida
@@ -549,6 +644,7 @@ async function verificarDisponibilidadeData(os, dataDesejada, periodoDesejado, d
   
   // Obter sugestões de agendamento usando a nova abordagem
   const sugestoes = await gerarSugestoesDeAgendamento(os);
+  console.log('[LOG] Sugestões retornadas:', JSON.stringify(sugestoes, null, 2));
   if (!sugestoes || !sugestoes.alternativas || sugestoes.alternativas.length === 0) {
     return {
       disponivel: false,
@@ -563,6 +659,11 @@ async function verificarDisponibilidadeData(os, dataDesejada, periodoDesejado, d
   const dataDesejadaDisponivel = sugestoes.alternativas.find(
     alt => alt.data === dataDesejada && alt.periodo === periodoDesejado
   );
+  if (dataDesejadaDisponivel) {
+    console.log(`[LOG] Data/período disponível encontrada para técnico ${dataDesejadaDisponivel.id_tecnico}`);
+  } else {
+    console.log('[LOG] Data/período desejado não disponível. Buscando alternativas próximas...');
+  }
   
   // Se a data desejada estiver disponível
   if (dataDesejadaDisponivel) {
