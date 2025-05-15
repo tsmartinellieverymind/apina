@@ -7,7 +7,8 @@ const dayjs = require('dayjs');
 const isBetweenPlugin = require('dayjs/plugin/isBetween');
 dayjs.extend(isBetweenPlugin);
 const { isDiaUtil, getProximoDiaUtil, getFeriadosNacionais } = require('./ixcUtilsData');
-const configuracoesAgendamento = require('./configuracoes_agendamentos');
+const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos.js');
+
 //const { getConfig } = require('../config/config');
 require('dotenv').config(); // carrega as variáveis do .env
 
@@ -285,7 +286,7 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
   // Extrair dados da configuração encontrada
   const prioridade = config.prioridade;
   const diasMin = config.dataMinimaAgendamentoDias;
-  const diasMax = config.prazoMaximoAgendamentoDias;
+  const diasMax = config.dataMaximaAgendamentoDias;
 
   console.log('[LOG] prioridade:', prioridade);
   console.log('[LOG] diasMin:', diasMin);
@@ -422,7 +423,491 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
       tecnicosSetor = tecnicosApi
         .filter(tec => Array.isArray(vinculos[tec.id]) && vinculos[tec.id].includes(setor))
         .map(tec => tec.id);
-      //console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
+      console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
+    } catch (e) {
+      console.error('Erro ao buscar técnicos ativos:', e.message);
+    }
+
+    // 5. Gerar períodos disponíveis por técnico
+    const alternativas = [];
+    const limiteAgendamentos = { M: 2, T: 3 }; // 2 pela manhã, 3 à tarde
+    
+    for (const idTec of tecnicosSetor) {
+      console.log(`[5] Gerando períodos disponíveis para técnico ${idTec}`);
+      
+      // Percorrer todas as datas dentro do período definido
+      let dia = dataMinimaObj.clone();
+      const datasDisponiveis = [];
+      
+      while (dia.isBefore(dataMaximaObj, 'day') || dia.isSame(dataMaximaObj, 'day')) {
+        // Verificar se é dia útil (não é final de semana nem feriado)
+        if (isDiaUtil(dia)) {
+          const dataStr = dia.format('YYYY-MM-DD');
+          const ocupados = ocupadosPorTecnico[idTec]?.[dataStr] || { M: 0, T: 0 };
+          const periodosDisponiveis = [];
+          // Só há dois períodos possíveis: manhã (M) e tarde (T)
+          for (const periodo of ['M', 'T']) {
+            if (ocupados[periodo] < limiteAgendamentos[periodo]) {
+              periodosDisponiveis.push(periodo);
+            }
+          }
+          if (periodosDisponiveis.length > 0) {
+            console.log(`[5.1] Técnico ${idTec} - Data ${dataStr} disponível nos períodos: ${periodosDisponiveis.join(', ')}`);
+            datasDisponiveis.push({ data: dataStr, periodos: periodosDisponiveis });
+          }
+        }
+        dia = dia.add(1, 'day');
+      }
+      if (datasDisponiveis.length > 0) {
+        alternativas.push({ id_tecnico: idTec, datasDisponiveis });
+      }
+    }
+
+    // 6. Aplicar lógica de prioridade para escolher a melhor data
+    let sugestao = null;
+    
+    if (alternativas.length > 0) {
+      // Ordenar alternativas por data (mais próxima primeiro)
+      alternativas.sort((a, b) => {
+        const dataA = dayjs(a.datasDisponiveis[0].data);
+        const dataB = dayjs(b.datasDisponiveis[0].data);
+        return dataA.diff(dataB);
+      });
+      
+      // Priorizar período específico (se fornecido) ou o período preferido da OS
+      const periodoPreferido = periodoEspecifico || os.melhor_horario_agenda || 'M';
+      console.log(`[INFO] Período preferido: ${periodoPreferido}`);
+      
+      // Filtrar alternativas que incluem o período preferido
+      const alternativasPreferidas = alternativas.filter(a => a.datasDisponiveis[0].periodos.includes(periodoPreferido));
+      const listaFinal = alternativasPreferidas.length > 0 ? alternativasPreferidas : alternativas;
+      
+      // Aplicar lógica de prioridade
+      if (prioridade === 0) {
+        // Prioridade 0: mais rápido possível
+        sugestao = listaFinal[0];
+      } else if (prioridade === 1) {
+        // Prioridade 1: meio do período
+        const meio = Math.floor(listaFinal.length / 2);
+        sugestao = listaFinal[meio];
+      } else if (prioridade === 2) {
+        // Prioridade 2: último dia do período
+        sugestao = listaFinal[listaFinal.length - 1];
+      } else {
+        // Padrão: mais rápido possível
+        sugestao = listaFinal[0];
+      }
+    }
+
+    // Formatar a sugestão principal
+    let sugestaoFormatada = null;
+    if (sugestao) {
+      const dataDisponivel = sugestao.datasDisponiveis[0];
+      const periodoPreferido = periodoEspecifico || os.melhor_horario_agenda || 'M';
+      const periodo = dataDisponivel.periodos.includes(periodoPreferido) ? periodoPreferido : dataDisponivel.periodos[0];
+      
+      sugestaoFormatada = {
+        id_tecnico: sugestao.id_tecnico,
+        data: dataDisponivel.data,
+        periodo: periodo
+      };
+    }
+    
+    // Formatar alternativas
+    const alternativasFormatadas = [];
+    for (const alt of alternativas) {
+      for (const dataDisp of alt.datasDisponiveis) {
+        for (const periodo of dataDisp.periodos) {
+          alternativasFormatadas.push({
+            id_tecnico: alt.id_tecnico,
+            data: dataDisp.data,
+            periodo: periodo
+          });
+        }
+      }
+    }
+    
+    // Ordenar alternativas por data
+    alternativasFormatadas.sort((a, b) => {
+      const dataA = dayjs(a.data);
+      const dataB = dayjs(b.data);
+      return dataA.diff(dataB);
+    });
+    
+    // Remover duplicidade da sugestão principal nas alternativas
+    const alternativasFiltradas = alternativasFormatadas.filter(alt => {
+      if (!sugestaoFormatada) return true;
+      return !(alt.id_tecnico === sugestaoFormatada.id_tecnico && alt.data === sugestaoFormatada.data && alt.periodo === sugestaoFormatada.periodo);
+    });
+
+    console.log('[7] Total de alternativas geradas:', alternativasFiltradas.length);
+    if (sugestaoFormatada) {
+      console.log('[8] Sugestão principal:', sugestaoFormatada);
+    } else {
+      console.log('[8] Não foi possível gerar uma sugestão principal');
+    }
+
+    return {
+      sugestao: sugestaoFormatada,
+      alternativas: alternativasFiltradas
+    };
+  } catch (error) {
+    console.error('Erro ao gerar sugestões de agendamento:', error);
+    return {
+      sugestao: null,
+      alternativas: []
+    };
+  }
+}
+
+// Modo Mock
+const MOCK_MODE = true; // Defina como true para usar dados mockados, false para API real
+const TODOS_TECNICOS_ATIVOS = true; // No modo mock, define se todos os técnicos devem ser considerados ativos
+
+async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
+  let ocupacao = {};
+  let todasOpcoes = [];
+
+  // Carregar dependências e dados mockados
+  const mockOrdensTecnicoOcupado = require('../app/data/mock_ordens_servico_tecnico_ocupado.js');
+
+  // Carregar configurações de agendamento
+  const hoje = dayjs();
+
+  // Inicializar objeto de ocupação vazio
+  // ocupacao[tecnico][data][periodo] = count
+
+  console.log("--- MODO MOCK ATIVADO PARA gerarSugestoesDeAgendamento ---");
+
+  try {
+    // 1. Carregar dependências e dados mockados
+    const mockOrdensTecnicoOcupado = require('../app/data/mock_ordens_servico_tecnico_ocupado.js');
+    const fs = require('fs');
+    const path = require('path');
+    const dayjs = require('dayjs');
+    const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos.js');
+
+    // 2. Carregar vínculos de técnicos com setores
+    const vinculosPath = path.join(__dirname, '../app/data/vinculos_tecnicos_setores.json');
+    const vinculos = JSON.parse(fs.readFileSync(vinculosPath, 'utf8'));
+
+    // 3. Extrair o setor da OS
+    const setor = String(os.id_setor || os.setor_id || os.setor);
+    console.log(`[MOCK] Setor da OS: ${setor}`);
+
+    // 4. Filtrar técnicos vinculados ao setor da OS
+    const tecnicosDoSetor = [];
+    for (const [idTecnico, setores] of Object.entries(vinculos)) {
+      if (Array.isArray(setores) && setores.includes(setor)) {
+        tecnicosDoSetor.push(idTecnico);
+      }
+    }
+    if (tecnicosDoSetor.length === 0) {
+      console.log(`[MOCK] Nenhum técnico encontrado para o setor ${setor}`);
+      return { sugestao: null, alternativas: [] };
+    }
+    console.log(`[MOCK] Técnicos do setor ${setor}: ${tecnicosDoSetor.join(', ')}`);
+
+    // 5. Obter configuração de SLA para o assunto da OS
+    console.log(`[MOCK][DEBUG] Buscando configuração para id_assunto: ${os.id_assunto}`);
+    console.log(`[MOCK][DEBUG] Configurações disponíveis:`, JSON.stringify(configuracoesAgendamento, null, 2));
+    
+    const config = configuracoesAgendamento.find(c => String(c.id_assunto) === String(os.id_assunto)) || configuracoesAgendamento[0];
+    console.log(`[MOCK][DEBUG] Configuração encontrada:`, JSON.stringify(config, null, 2));
+    
+    const diasMin = config.dataMinimaAgendamentoDias || 1;
+    const diasMax = config.dataMaximaAgendamentoDias || 7;
+    const limiteManha = config.limiteManha || 2;
+    const limiteTarde = config.limiteTarde || 3;
+    
+    console.log(`[MOCK][DEBUG] Valores usados: diasMin=${diasMin}, diasMax=${diasMax}, limiteManha=${limiteManha}, limiteTarde=${limiteTarde}`);
+
+    // Calcular range de datas válidas para agendamento com base na configuração
+    const dataMin = hoje.add(diasMin, 'day').format('YYYY-MM-DD');
+    const dataMax = hoje.add(diasMax, 'day').format('YYYY-MM-DD');
+    console.log(`[MOCK][DEBUG] Data mínima para agendamento: ${dataMin}`);
+    console.log(`[MOCK][DEBUG] Data máxima para agendamento: ${dataMax}`);
+    
+    // Montar ocupação dos técnicos usando mockOrdensTecnicoOcupado, apenas se a data da OS mock estiver dentro do range
+    if (mockOrdensTecnicoOcupado && Array.isArray(mockOrdensTecnicoOcupado.registros)) {
+      for (const osOcupada of mockOrdensTecnicoOcupado.registros) {
+        const idTecnico = String(osOcupada.id_tecnico);
+        const data = osOcupada.data_agenda ? osOcupada.data_agenda.substr(0,10) : null;
+        const periodo = osOcupada.melhor_horario_agenda;
+        if (!idTecnico || !data || !periodo) continue;
+        // Só considerar ocupações dentro do range
+        if (data < dataMin || data > dataMax) continue;
+        if (!ocupacao[idTecnico]) ocupacao[idTecnico] = {};
+        if (!ocupacao[idTecnico][data]) ocupacao[idTecnico][data] = { M: 0, T: 0 };
+        if (periodo === 'M' || periodo === 'T') {
+          ocupacao[idTecnico][data][periodo] = (ocupacao[idTecnico][data][periodo] || 0) + 1;
+        }
+      }
+    }
+
+    // 6. Gerar range de datas possíveis (apenas dias úteis)
+    let datasPossiveis = [];
+    let data = hoje.add(diasMin, 'day');
+    let diasUteisContados = 0;
+    while (diasUteisContados < (diasMax - diasMin + 1)) {
+      // Considerar apenas dias úteis (segunda a sexta)
+      if ([1,2,3,4,5].includes(data.day())) {
+        datasPossiveis.push(data.format('YYYY-MM-DD'));
+        diasUteisContados++;
+      }
+      data = data.add(1, 'day');
+    }
+
+    // 7. Gerar todas as opções de agendamento disponíveis
+    let sugestao = null;
+    let alternativas = [];
+    let todasOpcoes = [];
+
+    // Preferir o período da OS original, se definido
+    const periodoPreferido = os.melhor_horario_agenda || 'M';
+    const periodos = ['M', 'T'];
+    
+    // Reordenar períodos para priorizar o preferido
+    if (periodoPreferido === 'T') {
+      periodos.reverse(); // Coloca 'T' primeiro
+    }
+
+    // Para cada data possível
+    for (const dataStr of datasPossiveis) {
+      // Para cada técnico do setor
+      for (const idTecnico of tecnicosDoSetor) {
+        // Para cada período (priorizando o preferido)
+        for (const periodo of periodos) {
+          // Verificar ocupação do técnico nessa data e período
+          const ocupacaoAtual = 
+            ocupacao[idTecnico]?.[dataStr]?.[periodo] || 0;
+          
+          // Verificar limite de agendamentos por período
+          const limite = periodo === 'M' ? limiteManha : limiteTarde;
+          
+          // Se há vaga disponível
+          if (ocupacaoAtual < limite) {
+            // Criar opção de agendamento
+            const opcao = {
+              data: dataStr,
+              periodo,
+              id_tecnico: idTecnico,
+              ocupacao: ocupacaoAtual,
+              limite
+            };
+            
+            todasOpcoes.push(opcao);
+          }
+        }
+      }
+    }
+
+    // 8. Ordenar opções por data, período preferido e ocupação
+    todasOpcoes.sort((a, b) => {
+      // Primeiro por data
+      if (a.data !== b.data) return a.data.localeCompare(b.data);
+      
+      // Depois pelo período preferido
+      if (a.periodo !== b.periodo) {
+        return a.periodo === periodoPreferido ? -1 : 1;
+      }
+      
+      // Por fim, pela menor ocupação
+      return a.ocupacao - b.ocupacao;
+    });
+
+    // 9. Definir sugestão principal e alternativas
+    if (todasOpcoes.length > 0) {
+      sugestao = todasOpcoes[0];
+      alternativas = todasOpcoes.slice(1);
+    }
+
+    // Log de depuração detalhado
+    console.log('[MOCK][DEBUG] Ocupação:', JSON.stringify(ocupacao, null, 2));
+    console.log('[MOCK][DEBUG] Todas as opções consideradas:', JSON.stringify(todasOpcoes, null, 2));
+    console.log('[MOCK][DEBUG] Sugestão principal:', JSON.stringify(sugestao, null, 2));
+    console.log('[MOCK][DEBUG] Alternativas:', JSON.stringify(alternativas.slice(0, 5), null, 2)); // Mostrar apenas as 5 primeiras alternativas no log
+    return {
+      sugestao,
+      alternativas
+    };
+
+  } catch (error) {
+    console.error('[MOCK] Erro ao gerar sugestões de agendamento:', error);
+    return {
+      sugestao: null,
+      alternativas: []
+    };
+  }
+}
+
+async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
+  if (MOCK_MODE) {
+    return gerarSugestoesDeAgendamentoMock(os, opcoes);
+  } else {
+    return gerarSugestoesDeAgendamentoOriginal(os, opcoes);
+  }
+}
+
+async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
+  // Lógica original da API
+  const { dataEspecifica, periodoEspecifico } = opcoes;
+  console.log('====[ gerarSugestoesDeAgendamento ]====');
+  console.log('[LOG] Opções recebidas:', opcoes);
+  console.log('[LOG] Objeto OS recebido:', JSON.stringify(os, null, 2));
+  // Removed log referencing prioridade before it's defined
+
+  // Encontrar configuração para o assunto da OS
+  const idAssunto = os.id_assunto;
+  const config = configuracoesAgendamento.find(c => c.id_assunto == idAssunto);
+
+  if (!config) {
+    console.error(`[ERRO] Configuração de agendamento não encontrada para o assunto ID: ${idAssunto}`);
+    // Retorna vazio se não encontrar config, impedindo agendamento.
+    return { sugestao: null, alternativas: [] };
+  }
+
+  // Extrair dados da configuração encontrada
+  const prioridade = config.prioridade;
+  const diasMin = config.dataMinimaAgendamentoDias;
+  const diasMax = config.dataMaximaAgendamentoDias;
+
+  console.log('[LOG] prioridade:', prioridade);
+  console.log('[LOG] diasMin:', diasMin);
+  console.log('[LOG] diasMax:', diasMax);
+ 
+  // Calcular data mínima
+  let dataMinimaObj;
+  
+  // Se foi especificada uma data, usar essa data como mínima
+  if (dataEspecifica && dayjs(dataEspecifica).isValid()) {
+    dataMinimaObj = dayjs(dataEspecifica);
+    console.log(`[INFO] Usando data específica como mínima: ${dataMinimaObj.format('DD/MM/YYYY')}`);
+  } else {
+    dataMinimaObj = dayjs(); // Começa de hoje
+    if (diasMin > 0) {
+        dataMinimaObj = dataMinimaObj.add(diasMin, 'day');
+    }
+    // Garante que a data mínima seja um dia útil
+    while (!isDiaUtil(dataMinimaObj)) {
+        dataMinimaObj = dataMinimaObj.add(1, 'day');
+    }
+  }
+
+  // Calcular data máxima
+  let dataMaximaObj;
+  
+  // Se foi especificada uma data, usar essa data como máxima também
+  if (dataEspecifica && dayjs(dataEspecifica).isValid()) {
+    dataMaximaObj = dayjs(dataEspecifica);
+    console.log(`[INFO] Usando data específica como máxima: ${dataMaximaObj.format('DD/MM/YYYY')}`);
+  } else {
+    let dataBaseParaMaxima = os.data_abertura ? dayjs(os.data_abertura) : dayjs();
+    dataMaximaObj = dataBaseParaMaxima; // Começa da data base
+    let diasUteisContados = 0;
+
+    // Adiciona 'diasMax' dias úteis à data base
+    while (diasUteisContados < diasMax) {
+        dataMaximaObj = dataMaximaObj.add(1, 'day');
+        if (isDiaUtil(dataMaximaObj)) {
+            diasUteisContados++;
+        }
+    }
+  }
+
+  // Garante que a data máxima seja pelo menos um dia útil após a data mínima
+  let dataMinimaMaisUmDiaUtil = getProximoDiaUtil(dataMinimaObj);
+  if (dataMaximaObj.isBefore(dataMinimaMaisUmDiaUtil)) {
+      dataMaximaObj = dataMinimaMaisUmDiaUtil;
+      console.log(`[INFO] Data máxima ajustada para ${dataMaximaObj.format('DD/MM/YYYY')} para garantir intervalo mínimo.`);
+  }
+
+  console.log(`OS ID: ${os.id}, Assunto: ${idAssunto}, Setor: ${os.setor}`);
+  console.log(`Config encontrada: Prioridade=${prioridade}, MinDias=${diasMin}, MaxDias=${diasMax}`);
+  console.log(`[LOG] Datas para análise: mínima=${dataMinimaObj.format('YYYY-MM-DD')}, máxima=${dataMaximaObj.format('YYYY-MM-DD')}`);
+  console.log(`Data mínima calculada: ${dataMinimaObj.format('DD/MM/YYYY')}`);
+  console.log(`Data máxima calculada: ${dataMaximaObj.format('DD/MM/YYYY')}`);
+
+  const periodos = ['M', 'T']; // M = manhã, T = tarde
+  const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor; // Carregar vínculos aqui (já é o resultado da função)
+  
+  // Carregar vínculos de técnicos com setores
+  // const vinculos = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/vinculos_tecnicos_setores.json'), 'utf8'));
+
+  // Corrigir campo de setor
+  const setor = String(os.id_setor || os.setor_id || os.setor);
+  try {
+    // 1. Buscar OS agendadas do mesmo setor, status 'AG', dentro do período definido
+    const body = new URLSearchParams();
+    body.append('qtype', 'su_oss_chamado.status');
+    body.append('query', 'AG');
+    body.append('oper', '=');
+    body.append('page', '1');
+    body.append('rp', '1000');
+    body.append('sortname', 'su_oss_chamado.id');
+    body.append('sortorder', 'desc');
+
+    const response = await api.post('/su_oss_chamado', body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ixcsoft: 'listar'
+      }
+    });
+
+    const osAgendadas = response.data.registros.filter(o => 
+      o.status === 'AG' && 
+      o.data_agenda_final && 
+      dayjs(o.data_agenda_final).isBetween(dataMinimaObj, dataMaximaObj, null, '[]')
+      //  &&
+      // o.id_tecnico
+    );
+    console.log('[1] Total de OS agendadas consideradas:', osAgendadas.length);
+    osAgendadas.forEach(o => {
+      console.log(`[1.1] OS ${o.id} - Técnico: ${o.id_tecnico}, Data: ${o.data_agenda_final}, Período: ${o.melhor_horario_agenda}`);
+    });
+
+    // 3. Montar períodos ocupados por técnico e data
+    const ocupadosPorTecnico = {};
+    for (const o of osAgendadas) {
+      const idTec = o.id_tecnico;
+      const data = dayjs(o.data_agenda_final).format('YYYY-MM-DD');
+      const hora = dayjs(o.data_agenda_final).format('HH:mm:ss');
+      const periodo = o.melhor_horario_agenda || (parseInt(hora) < 12 ? 'M' : 'T'); // Usa 'M' ou 'T' baseado na hora
+      
+      if (!ocupadosPorTecnico[idTec]) ocupadosPorTecnico[idTec] = {};
+      if (!ocupadosPorTecnico[idTec][data]) ocupadosPorTecnico[idTec][data] = { M: 0, T: 0 };
+      ocupadosPorTecnico[idTec][data][periodo]++;
+    }
+    
+    console.log('[3] Mapeamento de ocupação por técnico concluído');
+    Object.entries(ocupadosPorTecnico).forEach(([tec, datas]) => {
+      Object.entries(datas).forEach(([data, periodos]) => {
+        console.log(`[3.1] Técnico ${tec} - ${data}: manhã=${periodos.M}, tarde=${periodos.T}`);
+      });
+    });
+
+    // 4. Buscar todos os técnicos ativos (id_funcao=2) na API e filtrar pelo vínculo com o setor da OS
+    const bodyTec = new URLSearchParams();
+    console.log('[4] Buscando técnicos ativos (id_funcao=2) na API...');
+    bodyTec.append('qtype', 'funcionarios.id'); // buscar todos
+    bodyTec.append('query', '0');
+    bodyTec.append('oper', '!=');
+    bodyTec.append('page', '1');
+    bodyTec.append('rp', '1000');
+    bodyTec.append('sortname', 'funcionarios.id');
+    bodyTec.append('sortorder', 'asc');
+    bodyTec.append('filter', JSON.stringify({ ativo: 'S', id_funcao: '2' }));
+    let tecnicosSetor = [];
+    try {
+      const respTec = await api.post('/funcionarios', bodyTec, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ixcsoft: 'listar' }
+      });
+      const tecnicosApi = Object.values(respTec.data?.registros || {});
+      //console.log('[4.1] Técnicos ativos retornados pela API:', tecnicosApi.map(t => ({id: t.id, nome: t.nome, setores: vinculos[t.id]})));
+      tecnicosSetor = tecnicosApi
+        .filter(tec => Array.isArray(vinculos[tec.id]) && vinculos[tec.id].includes(setor))
+        .map(tec => tec.id);
+      console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
     } catch (e) {
       console.error('Erro ao buscar técnicos ativos:', e.message);
     }

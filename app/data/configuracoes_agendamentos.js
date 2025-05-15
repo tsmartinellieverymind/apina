@@ -26,7 +26,7 @@ const configuracoesAgendamento = [
     id_assunto: 1,
     prioridade: 2,
     dataMinimaAgendamentoDias: 1,
-    dataMaximaAgendamentoDias: 7,
+    dataMaximaAgendamentoDias: 2,
     limiteManha: 2,
     limiteTarde: 3
   },
