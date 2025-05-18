@@ -702,6 +702,40 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
       }
     }
 
+    // Adicionar informação sobre limites de instalação em cada opção
+    // Isso nos permitirá filtrar corretamente depois com base no tipo de serviço
+    for (const opcao of todasOpcoes) {
+      const data = opcao.data;
+      const idTecnico = opcao.id_tecnico;
+      
+      // Verificar se há instalações agendadas nesta data para este técnico
+      const totalInstalacoesNessaData = ocupacaoInstalacao[idTecnico]?.[data] || 0;
+      
+      // Adicionar limite de instalação atingido como propriedade da opção
+      const limiteInstalacoes = 1; // Apenas 1 instalação por técnico por dia
+      opcao.limite_instalacao_atingido = totalInstalacoesNessaData >= limiteInstalacoes;
+      opcao.total_instalacoes = totalInstalacoesNessaData;
+      
+      console.log(`[MOCK][DEBUG] Opção ${data} - ${opcao.periodo} - Técnico ${idTecnico} - Limite de instalação atingido: ${opcao.limite_instalacao_atingido} (${totalInstalacoesNessaData}/${limiteInstalacoes})`);
+    }
+    
+    // Determinar o tipo de serviço para a OS atual
+    const osConfig = configuracoesAgendamento.find(c => String(c.id_assunto) === String(os.id_assunto)) || configuracoesAgendamento[0];
+    const tipoServico = osConfig.tipo || 'manutencao';
+    console.log(`[MOCK][INFO] Tipo de serviço da OS atual: ${tipoServico} (id_assunto: ${os.id_assunto})`);
+    
+    // Para OS do tipo 'instalacao', filtrar opções onde limite_instalacao_atingido = true
+    const todasOpcoesOriginal = [...todasOpcoes]; // Guardar todas as opções antes do filtro
+    
+    if (tipoServico === 'instalacao') {
+      console.log(`[MOCK][INFO] Filtrando opções para instalação - antes: ${todasOpcoes.length} opções`);
+      todasOpcoes = todasOpcoes.filter(opcao => opcao.limite_instalacao_atingido === false);
+      console.log(`[MOCK][INFO] Após filtro de instalação - restaram: ${todasOpcoes.length} opções`);
+    } else {
+      // Para manutenção, não aplicamos o filtro de limite de instalação
+      console.log(`[MOCK][INFO] Não aplicando filtro de limite de instalação para manutenção`);
+    }
+    
     // 8. Ordenar opções por data, período preferido e ocupação
     todasOpcoes.sort((a, b) => {
       // Primeiro por data
@@ -720,6 +754,8 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     if (todasOpcoes.length > 0) {
       sugestao = todasOpcoes[0];
       alternativas = todasOpcoes.slice(1);
+    } else {
+      console.log(`[MOCK][ALERTA] Nenhuma opção disponível após filtros`);
     }
 
     // Log de depuração detalhado
