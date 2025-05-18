@@ -17,18 +17,16 @@ const configuracoesAgendamento = [
     prioridade: 3,
     dataMinimaAgendamentoDias: 1,
     dataMaximaAgendamentoDias: 15,
-    limiteManha: 2,
-    limiteTarde: 3
+    tipo: 'manutencao'
   },
   
   // Instalação de Internet
   {
     id_assunto: 1,
     prioridade: 2,
-    dataMinimaAgendamentoDias: 1,
-    dataMaximaAgendamentoDias: 2,
-    limiteManha: 2,
-    limiteTarde: 3
+    dataMinimaAgendamentoDias:1,
+    dataMaximaAgendamentoDias:5,
+    tipo: 'instalacao'
   },
   
   // Suporte Técnico
@@ -37,18 +35,16 @@ const configuracoesAgendamento = [
     prioridade: 1,
     dataMinimaAgendamentoDias: 1,
     dataMaximaAgendamentoDias: 5,
-    limiteManha: 2,
-    limiteTarde: 3
+    tipo: 'manutencao'
   },
   
   // Cobrança
   {
-    id_assunto: 8,
+    id_assunto: 3,
     prioridade: 3,
     dataMinimaAgendamentoDias: 1,
     dataMaximaAgendamentoDias: 10,
-    limiteManha: 2,
-    limiteTarde: 3
+    tipo: 'instalacao'
   }
 ];
 

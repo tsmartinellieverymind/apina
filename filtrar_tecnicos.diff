@@ -1,0 +1,13 @@
+--- código antigo
++++ código novo
+@@ -422,8 +422,9 @@
+       const tecnicosApi = Object.values(respTec.data?.registros || {});
+-      //console.log('[4.1] Técnicos ativos retornados pela API:', tecnicosApi.map(t => ({id: t.id, nome: t.nome, setores: vinculos[t.id]})));
++      // Técnicos são obtidos diretamente do setor na nova estrutura
++      const tecnicosDoSetor = vinculosSetores[setor] || [];
++      console.log(`[4.1] Técnicos vinculados ao setor ${setor}:`, tecnicosDoSetor);
+       tecnicosSetor = tecnicosApi
+-        .filter(tec => Array.isArray(vinculos[tec.id]) && vinculos[tec.id].includes(setor))
++        .filter(tec => tecnicosDoSetor.includes(tec.id))
+         .map(tec => tec.id);
+       console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);

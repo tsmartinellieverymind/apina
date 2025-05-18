@@ -12,13 +12,8 @@ const isSameOrBefore = require('dayjs/plugin/isSameOrBefore');
 const fs = require('fs');
 const path = require('path');
 
-// Importar configurações de agendamento
-const { 
-  getConfiguracoesAgendamentoOS, 
-  getDataMinimaAgendamento, 
-  getDataMaximaAgendamento,
-  getPrioridadeAgendamento 
-} = require('./services/ixcConfigAgendamento');
+// Importar configurações de agendamento diretamente do JS
+const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos.js');
 
 // Lista de feriados nacionais fixos (formato MM-DD)
 const feriadosFixos = [

@@ -34,21 +34,44 @@ module.exports = async ({ osId, novoStatus, novaData }) => {
 
   // Buscar assunto/título da OS
   const assunto = payload.titulo || payload.mensagem || payload.motivo || 'a visita';
+  
+  // Importar as funções de formatação
+  const { gerarMensagemConfirmacaoAgendamento, formatarDataPeriodo } = require('../../services/ixcService');
+  
   // Buscar data/hora agendada
-  let dataHora = '';
+  let mensagem;
   const dataAgendada = payload.data_agenda_final || payload.novaData || novaData;
+  
   if (dataAgendada) {
     const [data, hora] = String(dataAgendada).split(' ');
-    if (data && hora) {
-      dataHora = `Ficou para o dia ${require('dayjs')(data).format('DD/MM/YYYY')} às ${hora.slice(0,5)}`;
-    } else if (data) {
-      dataHora = `Ficou para o dia ${require('dayjs')(data).format('DD/MM/YYYY')}`;
+    if (data) {
+      // Verificar se temos informação de período
+      if (payload.melhor_horario_agenda) {
+        // Usar a função de mensagem amigável
+        mensagem = gerarMensagemConfirmacaoAgendamento(assunto, data, payload.melhor_horario_agenda);
+        
+        // Adicionar o dia da semana para tornar a mensagem ainda mais amigável
+        const { diaDaSemanaExtenso } = require('../utils/dateHelpers');
+        const diaSemana = diaDaSemanaExtenso(data);
+        // Capitalizar primeira letra
+        const diaSemanaFormatado = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1);
+        
+        // Substituir a data formatada por data com dia da semana
+        const { dataFormatada } = formatarDataPeriodo(data, payload.melhor_horario_agenda);
+        mensagem = mensagem.replace(`dia ${dataFormatada}`, `${diaSemanaFormatado}, dia ${dataFormatada}`);
+      } else if (hora) {
+        // Se temos hora mas não período, formatar com hora específica
+        const dataFormatada = require('dayjs')(data).format('DD/MM/YYYY');
+        mensagem = `Prontinho! Sua visita para ${assunto} está agendada! Ficou para o dia ${dataFormatada} às ${hora.slice(0,5)}. Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
+      } else {
+        // Se temos apenas data
+        const dataFormatada = require('dayjs')(data).format('DD/MM/YYYY');
+        mensagem = `Prontinho! Sua visita para ${assunto} está agendada! Ficou para o dia ${dataFormatada}. Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
+      }
     }
+  } else {
+    mensagem = `Prontinho! Sua OS ${osId} foi atualizada com sucesso. Caso precise de mim, estou por aqui.`;
   }
-  const mensagem = dataHora
-    ? `Prontinho! Sua visita para ${assunto} está agendada! ${dataHora}.
-Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`
-    : `Prontinho! Sua OS ${osId} foi atualizada com sucesso. Caso precise de mim, estou por aqui.`;
   return {
     mensagem,
     data: resposta
@@ -57,7 +80,7 @@ Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`
 };
 
 // actions/agendar_os_completo.js
-const { buscarOS, atualizarOS } = require('../../services/ixcService');
+const { buscarOS, atualizarOS, gerarMensagemConfirmacaoAgendamento, formatarDataPeriodo } = require('../../services/ixcService');
 
 module.exports = async ({ osId, novaData, idTecnico, melhorHorario }) => {
   if (!osId || !novaData || !idTecnico || !melhorHorario) {
@@ -103,8 +126,27 @@ module.exports = async ({ osId, novaData, idTecnico, melhorHorario }) => {
     };
   }
 
+  // Buscar assunto/título da OS
+  const assunto = payload.titulo || payload.mensagem || payload.motivo || 'a visita';
+  
+  // Extrair a data da novaData
+  const [data] = String(novaData).split(' ');
+  
+  // Gerar mensagem amigável usando a função de formatação
+  let mensagem = gerarMensagemConfirmacaoAgendamento(assunto, data, melhorHorario);
+  
+  // Adicionar o dia da semana para tornar a mensagem ainda mais amigável
+  const { diaDaSemanaExtenso } = require('../utils/dateHelpers');
+  const diaSemana = diaDaSemanaExtenso(data);
+  // Capitalizar primeira letra
+  const diaSemanaFormatado = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1);
+  
+  // Substituir a data formatada por data com dia da semana
+  const { dataFormatada } = formatarDataPeriodo(data, melhorHorario);
+  mensagem = mensagem.replace(`dia ${dataFormatada}`, `${diaSemanaFormatado}, dia ${dataFormatada}`);
+  
   return {
-    mensagem: `✅ OS ${osId} agendada com sucesso.`,
+    mensagem,
     data: resposta
   };
 };

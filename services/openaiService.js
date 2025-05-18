@@ -655,14 +655,101 @@ Responda APENAS o JSON pedido.
 
 
 
+/**
+ * Encontra e extrai data e período em uma mensagem para agendamento no IXC
+ * @param {string} mensagem - Mensagem do usuário contendo referência a data/período
+ * @returns {Promise<{data: string, periodo: string}>} Objeto com data no formato YYYY-MM-DD e período (M ou T)
+ */
+async function encontraDataPeriodoIxc(mensagem) {
+try {
+// Garantir que a mensagem seja uma string e esteja limpa
+if (!mensagem || typeof mensagem !== 'string') {
+throw new Error('Mensagem inválida');
+}
+
+mensagem = mensagem.trim();
+
+// Usar o modelo GPT para extrair a data e o período
+const prompt = `
+Extraia a data e o período (manhã ou tarde) mencionados na seguinte mensagem do usuário.
+Retorne APENAS um objeto JSON com os campos "data" (formato YYYY-MM-DD) e "periodo" ("M" para manhã, "T" para tarde).
+Se não conseguir identificar ambas as informações, retorne null para o campo correspondente.
+
+Mensagem do usuário: "${mensagem}"
+
+Lembre-se: só retorne o objeto JSON, nada mais.
+`;
+
+const completion = await openai.chat.completions.create({
+model: "gpt-3.5-turbo",
+messages: [{ role: "user", content: prompt }],
+temperature: 0.2,
+max_tokens: 150
+});
+
+const resposta = completion.choices[0].message.content.trim();
+
+// Extrair apenas o JSON da resposta
+let jsonMatch = resposta.match(/\{[\s\S]*\}/);
+let jsonStr = jsonMatch ? jsonMatch[0] : resposta;
+
+// Tentar parsear o JSON
+const resultado = JSON.parse(jsonStr);
+
+// Validar resultado
+if (!resultado.data && !resultado.periodo) {
+return { data: null, periodo: null };
+}
+
+// Validar formato da data
+if (resultado.data && !/^\d{4}-\d{2}-\d{2}$/.test(resultado.data)) {
+// Tentar converter para formato correto se for uma data válida
+const dataObj = dayjs(resultado.data);
+if (dataObj.isValid()) {
+resultado.data = dataObj.format('YYYY-MM-DD');
+} else {
+resultado.data = null;
+}
+}
+
+// Validar período
+if (resultado.periodo) {
+if (typeof resultado.periodo === 'string') {
+// Normalizar para maiúsculas e pegar primeira letra
+const periodo = resultado.periodo.toUpperCase().trim();
+if (periodo === 'M' || periodo === 'MANHÃ' || periodo === 'MANHA' || periodo === 'MORNING') {
+resultado.periodo = 'M';
+} else if (periodo === 'T' || periodo === 'TARDE' || periodo === 'AFTERNOON') {
+resultado.periodo = 'T';
+} else {
+resultado.periodo = null;
+}
+} else {
+resultado.periodo = null;
+}
+}
+
+return {
+data: resultado.data || null,
+periodo: resultado.periodo || null
+};
+
+} catch (error) {
+console.error('Erro ao interpretar data e período:', error);
+return { data: null, periodo: null };
+}
+}
+
 module.exports = {
-  interpretarMensagem,
-  responderComBaseNaIntent,
-  interpretarDataNatural,
-  interpretaHora,
-  detectarIntentComContexto,
-  gerarMensagemDaIntent,
-  interpretarNumeroOS,
-  interpretarEscolhaOS,
-  interpretaDataePeriodo
+interpretarMensagem,
+responderComBaseNaIntent,
+interpretarDataNatural,
+interpretaDataePeriodo,
+interpretaHora,
+interpretarNumeroOS,
+interpretarEscolhaOS,
+detectarIntentComContexto,
+gerarMensagemDaIntent,
+gerarTodasAsIntentsPrompt,
+encontraDataPeriodoIxc,
 };

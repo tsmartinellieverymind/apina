@@ -1,0 +1,12 @@
+--- código antigo
++++ código novo
+@@ -346,7 +346,7 @@
+ 
+   const periodos = ['M', 'T']; // M = manhã, T = tarde
+-  const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor; // Carregar vínculos aqui (já é o resultado da função)
++  const { getVinculosSetoresTecnicos } = require('./ixcSetorTecnico'); // Nova estrutura
+   
+-  // Carregar vínculos de técnicos com setores
+-  // const vinculos = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/vinculos_tecnicos_setores.json'), 'utf8'));
++  // Usar a nova estrutura de vínculos (setores têm técnicos)
++  const vinculosSetores = getVinculosSetoresTecnicos();

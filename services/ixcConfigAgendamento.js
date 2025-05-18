@@ -154,34 +154,29 @@ function getConfiguracoesAgendamentoOS(os) {
 }
 
 /**
- * Retorna os vínculos entre técnicos e setores
- * @returns {Array} Lista de vínculos entre técnicos e setores
+ * Retorna os vínculos entre setores e técnicos
+ * @returns {Object} Objeto com a estrutura: { idSetor: [idTecnico1, idTecnico2, ...] }
  */
 function vinculosTecnicoSetor() {
   try {
-    // Tentar carregar do caminho relativo ao diretório services
-    const vinculosPath = path.join(__dirname, '../data/vinculos_tecnicos_setores.json');
+    // Tentar carregar do caminho relativo ao diretório services (novo formato)
+    const vinculosPath = path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json');
     if (fs.existsSync(vinculosPath)) {
       return JSON.parse(fs.readFileSync(vinculosPath, 'utf8'));
     }
     
-    // Se não encontrar o arquivo, retorna uma lista padrão de vínculos
-    return [
-      { id_tecnico: 1, id_setor: 1, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 1, id_setor: 2, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 1, id_setor: 3, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 1, id_setor: 4, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 2, id_setor: 1, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 2, id_setor: 4, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 3, id_setor: 2, ativo: true, funcao: 'Técnico' },
-      { id_tecnico: 3, id_setor: 3, ativo: true, funcao: 'Técnico' }
-    ];
+    // Se não encontrar o arquivo, retorna um objeto padrão com a nova estrutura
+    return {
+      "1": ["1", "2"], // Setor 1 tem técnicos 1 e 2
+      "2": ["1", "3"], // Setor 2 tem técnicos 1 e 3
+      "3": ["1", "3"], // Setor 3 tem técnicos 1 e 3
+      "4": ["1", "2"]  // Setor 4 tem técnicos 1 e 2
+    };
   } catch (error) {
-    console.error('Erro ao carregar vínculos de técnicos com setores:', error.message);
-    // Retorna uma lista vazia em caso de erro
-    return [];
+    console.error('Erro ao carregar vínculos de setores com técnicos:', error.message);
+    // Retorna um objeto vazio em caso de erro
+    return {};
   }
-  
 }
 
 // Executar a função vinculosTecnicoSetor e armazenar o resultado
