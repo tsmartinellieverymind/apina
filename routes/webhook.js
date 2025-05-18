@@ -39,7 +39,7 @@ const {
 async function interpretaDataePeriodo({ mensagem, agentId = 'default-agent', dados = {}, promptExtra = '' }) {
   try {
     // Primeiro, tenta extrair a data da mensagem
-    const dataInterp = await interpretarDataNatural(mensagem);
+    const dataInterp = await interpretarDataNatural(mensagem, agentId, dados, promptExtra + 'Frase do usuário: "' + mensagem + '"');
     console.log('====== DATA INTERPRETADA: ======');
     console.log(dataInterp);
     console.log('===============================')
@@ -50,7 +50,7 @@ async function interpretaDataePeriodo({ mensagem, agentId = 'default-agent', dad
     }
 
     // Tenta extrair o período da mensagem
-    const periodoInterp = await interpretaPeriodo(mensagem);
+    const periodoInterp = await interpretaPeriodo(mensagem, agentId, dados, promptExtra + 'Frase do usuário: "' + mensagem + '"');
 
     // Retorna objeto com data e período
     return {
@@ -390,6 +390,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
           break;
         }
+
+        /* --------------------------------------------------------------------
+          4.5 RECUSAR/CANCELAR
+        -------------------------------------------------------------------- */
         case 'recusar_cancelar': {if (!user.clienteId) { break;}
           // Limpa variáveis relacionadas ao fluxo
           user.osEscolhida = null;
@@ -526,7 +530,6 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
           break;
         }
-
 
         /* --------------------------------------------------------------------
           4.4 VERIFICAR OS
@@ -741,7 +744,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           4.6 EXTRAI DATA
         -------------------------------------------------------------------- */
         case 'extrair_data': {if (!user.clienteId) { break;}
-          const dataInterp = await interpretarDataNatural(mensagem);
+          const dataInterp = await interpretarDataNatural(mensagem, 'default-agent', contexto, 'Frase do usuário: "' + mensagem + '"');
           console.log('dataInterp: ' + dataInterp);
 
           if (!dataInterp || !dayjs(dataInterp).isValid()) {
@@ -861,7 +864,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
         /* --------------------------------------------------------------------
           4.8 AGENDAR DATA
         -------------------------------------------------------------------- */
-        case 'agendar_data': {if (!user.clienteId) { break;}if (!user.clienteId) { break;}
+        case 'agendar_data': {if (!user.clienteId) { break;}
           
           // Verificar se é um pedido de reagendamento
           const msgLower = mensagem.toLowerCase();
@@ -1070,9 +1073,6 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
         /* --------------------------------------------------------------------
           4.9 CONFIRMAR AGENDAMENTO
         -------------------------------------------------------------------- */
-        /* --------------------------------------------------------------------
-          4.9 CONSULTAR DISPONIBILIDADE DATA
-        -------------------------------------------------------------------- */
         case 'consultar_disponibilidade_data': {if (!user.clienteId) { break;}
           // Verificar se o usuário tem uma OS escolhida
           if (!user.osEscolhida) {
@@ -1086,7 +1086,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
 
           // Interpretar a data solicitada pelo usuário
-          const dataInterp = await interpretarDataNatural(mensagem);
+          const dataInterp = await interpretarDataNatural(mensagem, 'default-agent', contexto, 'Frase do usuário: "' + mensagem + '"');
           console.log('====== DATA SOLICITADA PARA VERIFICAÇÃO: ======');
           console.log(dataInterp);
           console.log('===============================');
@@ -1186,6 +1186,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
       
+        /* --------------------------------------------------------------------
+          4.9 CONFIRMAR AGENDAMENTO
+        -------------------------------------------------------------------- */
         case 'confirmar_agendamento': {if (!user.clienteId) { break;}
           
           console.log("================== user.osEscolhida ==================")  
@@ -1422,6 +1425,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
 
+        /* --------------------------------------------------------------------
+          4.10 FINALIZADO
+        -------------------------------------------------------------------- */
         case 'finalizado':
         default: {
           resposta = await gerarMensagemDaIntent({

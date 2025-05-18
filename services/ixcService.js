@@ -588,20 +588,21 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos.js');
 
     // 2. Carregar vínculos de técnicos com setores
-    const vinculosPath = path.join(__dirname, '../app/data/vinculos_tecnicos_setores.json');
+    const vinculosPath = path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json');
     const vinculos = JSON.parse(fs.readFileSync(vinculosPath, 'utf8'));
+    
+    // Carregar limites de instalações por setor
+    const vinculoSetoresTipoPath = path.join(__dirname, '../app/data/vinculo_setores_tipo.json');
+    const vinculoSetoresTipo = JSON.parse(fs.readFileSync(vinculoSetoresTipoPath, 'utf8'));
 
-    // 3. Extrair o setor da OS
+    // 3. Extrair o setor da OS e seu limite de instalações
     const setor = String(os.id_setor || os.setor_id || os.setor);
-    console.log(`[MOCK] Setor da OS: ${setor}`);
+    const limiteInstalacoesPorSetor = vinculoSetoresTipo[setor] || "1";
+    console.log(`[MOCK] Setor da OS: ${setor}, Limite de instalações por técnico/dia: ${limiteInstalacoesPorSetor}`);
 
     // 4. Filtrar técnicos vinculados ao setor da OS
-    const tecnicosDoSetor = [];
-    for (const [idTecnico, setores] of Object.entries(vinculos)) {
-      if (Array.isArray(setores) && setores.includes(setor)) {
-        tecnicosDoSetor.push(idTecnico);
-      }
-    }
+    const tecnicosDoSetor = vinculos[setor] || [];
+    console.log(`[MOCK][DEBUG] Buscando técnicos para o setor ${setor} nos vínculos:`, JSON.stringify(vinculos, null, 2));
     if (tecnicosDoSetor.length === 0) {
       console.log(`[MOCK] Nenhum técnico encontrado para o setor ${setor}`);
       return { sugestao: null, alternativas: [] };
@@ -709,12 +710,24 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
       const idTecnico = opcao.id_tecnico;
       
       // Verificar se há instalações agendadas nesta data para este técnico
-      const totalInstalacoesNessaData = ocupacaoInstalacao[idTecnico]?.[data] || 0;
+      // Inicializar contagem de instalações por técnico e data
+      let totalInstalacoesNessaData = 0;
       
-      // Adicionar limite de instalação atingido como propriedade da opção
-      const limiteInstalacoes = 1; // Apenas 1 instalação por técnico por dia
+      // Verificar ordens de instalação nas ordens ocupadas
+      if (mockOrdensTecnicoOcupado && Array.isArray(mockOrdensTecnicoOcupado.registros)) {
+        const ordensInstalacao = mockOrdensTecnicoOcupado.registros.filter(o => 
+          String(o.id_tecnico) === idTecnico && 
+          o.data_agenda && o.data_agenda.substr(0,10) === data &&
+          configuracoesAgendamento.find(c => String(c.id_assunto) === String(o.id_assunto))?.tipo === 'instalacao'
+        );
+        totalInstalacoesNessaData = ordensInstalacao.length;
+      }
+      
+      // Utilizar o limite de instalações do setor
+      const limiteInstalacoes = parseInt(limiteInstalacoesPorSetor) || 1;
       opcao.limite_instalacao_atingido = totalInstalacoesNessaData >= limiteInstalacoes;
       opcao.total_instalacoes = totalInstalacoesNessaData;
+      opcao.limite_instalacoes = limiteInstalacoes;
       
       console.log(`[MOCK][DEBUG] Opção ${data} - ${opcao.periodo} - Técnico ${idTecnico} - Limite de instalação atingido: ${opcao.limite_instalacao_atingido} (${totalInstalacoesNessaData}/${limiteInstalacoes})`);
     }
@@ -775,6 +788,66 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
       alternativas: []
     };
   }
+}
+
+/**
+ * Verifica se uma data e período específicos estão disponíveis para agendamento
+ * @param {Object} os - A ordem de serviço para a qual verificar disponibilidade
+ * @param {string} dataString - A data no formato YYYY-MM-DD a ser verificada
+ * @param {string} periodo - O período ('M' ou 'T') a ser verificado
+ * @param {Object} opcoes - Opções adicionais para a verificação
+ * @returns {Object} Resultado da verificação contendo disponibilidade e outras informações
+ */
+async function verificarDisponibilidade(os, dataString, periodo, opcoes = {}) {
+  // Obter as sugestões de agendamento para a OS
+  const resultado = await gerarSugestoesDeAgendamento(os, {
+    ...opcoes,
+    debug: false // Desabilitar logs detalhados por padrão
+  });
+  
+  // Extrair todas as opções disponíveis
+  const todasOpcoes = [
+    resultado.sugestao,
+    ...resultado.alternativas
+  ].filter(op => op);
+  
+  // Ordenar por data
+  todasOpcoes.sort((a, b) => a.data.localeCompare(b.data));
+  
+  // Calcular o range de datas disponíveis
+  const dataMinima = todasOpcoes.length > 0 ? todasOpcoes[0].data : null;
+  const dataMaxima = todasOpcoes.length > 0 ? todasOpcoes[todasOpcoes.length-1].data : null;
+  
+  // Calcular as opções disponíveis por data
+  const opcoesPorData = {};
+  todasOpcoes.forEach(op => {
+    if (!opcoesPorData[op.data]) {
+      opcoesPorData[op.data] = { M: false, T: false };
+    }
+    opcoesPorData[op.data][op.periodo] = !op.limite_instalacao_atingido;
+  });
+  
+  // Verificar se a data solicitada está disponível
+  const dentroDoRange = dataMinima && dataMaxima && dataMinima <= dataString && dataString <= dataMaxima;
+  const dataTemOpcoes = opcoesPorData[dataString];
+  const periodoDisponivel = dataTemOpcoes ? dataTemOpcoes[periodo] : false;
+  
+  // Encontrar periódos disponíveis para a data, se houver
+  const periodosDisponiveis = dataTemOpcoes ? 
+    Object.entries(dataTemOpcoes)
+      .filter(([_, disponivel]) => disponivel)
+      .map(([p]) => p) : [];
+  
+  // Retornar resultado detalhado
+  return {
+    disponivel: periodoDisponivel,
+    dentroDoRange,
+    dataMinima,
+    dataMaxima,
+    periodosDisponiveis,
+    opcoesPorData,
+    todasOpcoes
+  };
 }
 
 async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
@@ -1255,6 +1328,7 @@ module.exports = {
   buscarColaboradorPorCpf,
   buscarClientePorCpf,
   gerarSugestoesDeAgendamento,
+  verificarDisponibilidade,
   verificarDisponibilidadeData,
   obterAlternativasProximas
 };

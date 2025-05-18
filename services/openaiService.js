@@ -100,7 +100,8 @@ Sua função é analisar a mensagem do cliente e detectar qual a intenção dele
 4. Se disser "ok", "pode ser", "fechado" ou similares:
    - Se a ÚLTIMA PERGUNTA foi sobre **agendamento**, e a resposta é de aceitação → **confirmar_agendamento**.
    - Se foi sobre **escolha de OS**, e a resposta é de aceitação → **confirmar_escolha_os**.
-5. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **pedir uma nova opção de data/hora** → **agendar_data**.
+5. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
+6. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
 
 
 ### Contexto da conversa:
@@ -422,26 +423,27 @@ Retorne SOMENTE a frase (sem JSON).
  * @param {string} mensagem
  * @returns {Promise<string|null>}
  */
-async function interpretarDataNatural(mensagem) {
+async function interpretarDataNatural(mensagem, agentId = 'default-agent', dados = {}, promptExtra = '') {
+  const agent = require('../app/engine/loader').loadAgent(agentId);
   const prompt = `
+"${agent.nome}", sua função é ${agent.role}. Você tem a seguinte personalidade: ${agent.personality}
+
 Você é um assistente que interpreta datas em linguagem natural e retorna sempre no seguinte formato JSON:
-Você deve encontrar o valor da variavel "sugestao_datas" onde respeitando o valor maximo de SLA de (XXX)
+Você deve encontrar o valor da variavel "data_interpretada".
 
 {
   "data_interpretada": "YYYY-MM-DD",
-  "sugestao_datas": "String"
+  "periodo": "M" ou "T"
 }
-
-Tente identificar a data mencionada pelo usuário com base na data atual. Caso não encontre nenhuma data válida, responda:
-
-{
-  "data_interpretada": null,
-  "sugestao_datas": "String"
-}
+**Manha = M
+**Tarde = T
 
 Frase do usuário: "${mensagem}"
 Hoje é: ${dayjs().format('YYYY-MM-DD')}
 
+Contexto principal: ${JSON.stringify(dados)}
+Contexto extra: ${promptExtra}
+    
 Retorne APENAS o JSON, sem mais nada.
 `;
 
@@ -449,7 +451,7 @@ Retorne APENAS o JSON, sem mais nada.
     const resposta = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content: 'Você é um assistente que interpreta datas informais.' },
+        { role: 'system', content: agent.personality },
         { role: 'user', content: prompt }
       ],
       temperature: 0.1
