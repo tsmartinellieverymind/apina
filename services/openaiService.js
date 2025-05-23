@@ -93,25 +93,34 @@ async function detectarIntentComContexto({
 Você é ${agent.nome}, um assistente da Ibiunet.
 Sua função é analisar a mensagem do cliente e detectar qual a intenção dele, com base nas opções disponíveis abaixo.
 
-### Regras Fixas:
+### Regras Fixas (em ordem de prioridade):
 1. Se identificar 11 números seguidos → **extrair_cpf**.
 2. Se mencionar "CPF" mas sem número → **aleatorio**.
 3. Se disser "primeira", "segunda", "terceira" → **escolher_os**.
-4. Se disser "ok", "pode ser", "fechado" ou similares:
+4. Se o usuário mencionar um dia da semana específico (segunda, terça, quarta, etc.) ou uma data (amanhã, dia 10, próxima semana) → **extrair_data**, mesmo que use frases como "pode ser" ou "prefiro".
+5. Se o usuário mencionar um período do dia (manhã, tarde) ou horário específico → **extrair_hora**, mesmo que use frases como "pode ser" ou "prefiro".
+6. Se disser "ok", "pode ser", "fechado" ou similares SEM mencionar uma data ou período específico:
    - Se a ÚLTIMA PERGUNTA foi sobre **agendamento**, e a resposta é de aceitação → **confirmar_agendamento**.
    - Se foi sobre **escolha de OS**, e a resposta é de aceitação → **confirmar_escolha_os**.
-5. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
-6. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
+7. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
+8. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
 
+### Exemplos de Classificação Correta:
+- "pode ser" (sem mencionar data/hora) → **confirmar_agendamento**
+- "pode ser terça?" → **extrair_data**
+- "prefiro pela manhã" → **extrair_hora**
+- "essa data está boa, mas prefiro de tarde" → **alterar_periodo**
+- "tem disponibilidade na sexta?" → **consultar_disponibilidade_data**
+- "quero ver outras opções" → **datas_disponiveis**
 
 ### Contexto da conversa:
-- Última intent detectada: ${intentAnterior || '—'}
-- Última pergunta feita ao cliente: "${mensagemAnterior || '—'}"
-- Tipo da última pergunta: "${tipoUltimaPergunta || '—'}"
+- Última intent detectada: ${intentAnterior}
+- Última pergunta feita ao cliente: "${mensagemAnterior}"
+- Tipo da última pergunta: "${tipoUltimaPergunta}"
 - Nova mensagem do cliente: "${mensagem}"
 
 Resumo adicional:
-${promptExtra.replace(/\\n/g, '\n')}
+${promptExtra}
 
 ### Intents disponíveis:
 ${blocoDeIntents}
@@ -185,182 +194,6 @@ logPrompt('prompt Mensagem:', prompt);
   } catch (error) {
     logPrompt('❌ Erro ao gerar resposta da intent:', error);
     return 'Desculpa, não consegui processar isso agora. Pode repetir?';
-  }
-}
-
-async function interpretarMensagem({
-  mensagem,
-  agentId = 'default-agent',
-  promptExtra = '',
-  intentAnterior = '',
-  mensagemAnterior = ''
-}) {
-  if (!mensagem || typeof mensagem !== 'string') {
-    logPrompt('❌ Mensagem inválida recebida para interpretação:', mensagem);
-    return {
-      intent: 'default',
-      data: {},
-      mensagem: 'Desculpa, não consegui entender o que você quis dizer. Pode tentar de novo?'
-    };
-  }
-
-  const agent = loadAgent(agentId);
-
-  /**
-   * Observação:
-   * - No "promptExtra", esperamos vir dados como:
-   *   "O usuário se chama Fulano e gosta de alienígenas e futebol.
-   *    Por favor, faça small talk sobre isso antes de retomar o assunto principal."
-   * - Assim, o GPT terá esse contexto e poderá usar esses detalhes na resposta.
-   */
-  const prompt = `
-Você é ${agent.nome}, um assistente focado em atender clientes de forma amigável e eficiente. Sua função: ${agent.role}.
-
-Use este contexto adicional para estabelecer uma pequena conversa (small talk) sobre o que estiver descrito (nome, interesses etc.), mas sem fugir do seu objetivo principal de suporte.
-
-Caso isso aconteça diga que está em horario de trabalho e não pode falar sobre isso, mas quem sabe depois?
-
-Evite responder as frases com uma saudação do tipo Olá! Só fale caso tenha certeza que é a primeira interação do dia e a intent igual a "inicio"
-
-Depois de fazer uma rápida menção a esse contexto (se existir), interprete a mensagem do usuário e retorne **APENAS** o JSON no seguinte formato:
-
-{
-  "intent": "nome_da_intent",
-  "data": {},
-  "mensagem": "resposta amigável ao usuário, incluindo um pouco do small talk"
-}
-
-Contexto anterior:
-- Última intenção: "${intentAnterior}"
-- Pergunta anterior: "${mensagemAnterior}"
-- Nova mensagem do usuário: "${mensagem}"
-
-*IMPORTANTE*
-Se a "Pergunta anterior" tiver alguma saudação do tipo (Oi, Olá etc) e a intent anterior for diferente de inicial, não de nenhuma saudação.
-
-### Dados adicionais (promptExtra) Utilize apenas o último inserido caso preciso, evite usar essas informações, só utilize se for perguntado.
-Os topicos abaixo estão separados por quebra de linha, se a proxima resposta (Nova mensagem do usuário) não tiver relação/continuidade com a mensagem a (Pergunta anterior) você volta a pedir o CPF para iniciar o atendimento de agendamento.
-${promptExtra}
-
-### Intents possíveis
-
-
-1) "inicio"  
-   - Quando o usuário inicia ou saúda.
-   - Exemplo de resposta (apenas uma vez): 
-     {
-       "intent": "inicio",
-       "data": {},
-       "mensagem": "Olá, sou ${agent.nome} da Ibiunet! Tudo bem? Poderia me enviar seu CPF para iniciarmos o atendimento?"
-     }
-
-2) "aleatorio"  
-   - Se o usuário fala algo fora do fluxo ou fora do contexto (ex.: aliens, futebol, etc.).
-   - Responda curto e tente puxar o assunto de volta para CPF, agendamento, OS etc.
-   - Exemplo:
-     {
-       "intent": "aleatorio",
-       "data": {},
-       "mensagem": "Legal (Mostrar interesse sobre o que foi dito), mas primeiro eu vou precisar te identificar! Me mande seu CPF para a gente iniciar."
-     }
-
-3) "extrair_cpf"  
-   - O usuário está informando o CPF. Ex:(522.473.726-51 ; 52247372651) deve conter 11 digitos menos que nova a intent deve ser considerada escolher_os
-   - Exemplo:
-     {
-       "intent": "extrair_cpf",
-       "data": {},
-       "mensagem": "Ok, CPF recebido! Já vou verificar seus dados."
-     }
-
-4) "verificar_os"  
-   - Ex.: "Quero consultar minha OS" ou "Que dia o técnico vem?" 
-   - Exemplo:
-     {
-       "intent": "verificar_os",
-       "data": {},
-       "mensagem": "Certo, vou dar uma olhada nas suas OS. Só um instante."
-     }
-
-5) "escolher_os"  
-   - O usuário escolhe ou informa qual OS quer editar/agendar. Pode vir apenas como um número sempre menor que 9 digitos. verificar 
-   - Exemplo:
-     {
-       "intent": "escolher_os",
-       "data": {},
-       "mensagem": "Entendi, você escolheu a OS 1234. Agora podemos agendar ou atualizar."
-     }
-
-6) "agendar_data"  
-   - O usuário pede explicitamente para agendar ou marcar visita.
-   - Exemplo:
-     {
-       "intent": "agendar_data",
-       "data": {},
-       "mensagem": "Claro! Qual dia seria melhor para você?"
-     }
-
-7) "extrair_data"  
-   - O usuário mencionou datas em linguagem natural (ex.: amanhã, sábado, dia 20).
-   - Exemplo:
-     {
-       "intent": "extrair_data",
-       "data": {},
-       "mensagem": "Você mencionou essa data. Vou interpretá-la e confirmar."
-     }
-
-8) "confirmar_agendamento"  
-   - O usuário confirma a data final que deseja.
-   - Exemplo:
-     {
-       "intent": "confirmar_agendamento",
-       "data": {},
-       "mensagem": "Perfeito, confirmando sua visita. Qualquer mudança, me avise."
-     }
-
-9) "finalizado"
-   - Fluxo concluído ou usuário se despediu.
-   - Exemplo:
-     {
-       "intent": "finalizado",
-       "data": {},
-       "mensagem": "Ótimo, encerramos por aqui. Obrigado pelo contato e até mais!"
-     }
-
-12) "extrair_hora"  
-   - O usuário mencionou datas em linguagem natural (ex.: amanhã, sábado, dia 20) e também horario ( 10 da manhã, final da tarde etc)
-   - Exemplo:
-     {
-       "intent": "extrair_hora",
-       "data": {},
-       "mensagem": "Você mencionou essa data. Vou interpretá-la e confirmar."
-     }
-
-Importante: **retorne APENAS o JSON** (sem texto fora do objeto JSON). Se não tiver certeza, use "aleatorio" ou "desconhecido".
-`;
-
-  logPrompt('Interpretar intencao promptExtra:', prompt);
-
-  try {
-    const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: agent.personality },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.2
-    });
-
-    const respostaText = resposta.choices[0].message.content;
-    return JSON.parse(respostaText);
-
-  } catch (error) {
-    logPrompt('❌ Erro no OpenAI:', error);
-    return {
-      intent: 'default',
-      data: {},
-      mensagem: 'Desculpa, não entendi o que você quis dizer. Pode tentar de novo?'
-    };
   }
 }
 
@@ -507,46 +340,6 @@ Hoje é: ${dayjs().format('YYYY-MM-DD')}
   }
 }
 
-
-async function interpretaHora(mensagem) {
-  const prompt = `
-Você é um assistente que interpreta horários em linguagem natural e retorna sempre no seguinte formato JSON:
-
-{
-  "hora_interpretada": "HH:mm:00"
-}
-
-Tente identificar o horário mencionado pelo usuário com base na frase. Caso não encontre nenhuma hora válida, responda:
-
-{
-  "hora_interpretada": null
-}
-
-Frase do usuário: "${mensagem}"
-
-Retorne APENAS o JSON, sem mais nada.
-`;
-
-  try {
-    const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: 'Você é um assistente que interpreta horários informais.' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.1
-    });
-
-    const json = JSON.parse(resposta.choices[0].message.content);
-    logPrompt('hora interpretada:', json.hora_interpretada);
-    return json.hora_interpretada;
-  } catch (error) {
-    logPrompt('❌ Erro ao interpretar hora:', error);
-    return null;
-  }
-}
-
-
 async function interpretarNumeroOS({ mensagem, osList = [], agentId = '', dados = {}, promptExtra = '' }) {
   /* --------  monta lista reduzida  -------- */
   const listaReduzida = osList
@@ -656,102 +449,12 @@ Responda APENAS o JSON pedido.
 }
 
 
-
-/**
- * Encontra e extrai data e período em uma mensagem para agendamento no IXC
- * @param {string} mensagem - Mensagem do usuário contendo referência a data/período
- * @returns {Promise<{data: string, periodo: string}>} Objeto com data no formato YYYY-MM-DD e período (M ou T)
- */
-async function encontraDataPeriodoIxc(mensagem) {
-try {
-// Garantir que a mensagem seja uma string e esteja limpa
-if (!mensagem || typeof mensagem !== 'string') {
-throw new Error('Mensagem inválida');
-}
-
-mensagem = mensagem.trim();
-
-// Usar o modelo GPT para extrair a data e o período
-const prompt = `
-Extraia a data e o período (manhã ou tarde) mencionados na seguinte mensagem do usuário.
-Retorne APENAS um objeto JSON com os campos "data" (formato YYYY-MM-DD) e "periodo" ("M" para manhã, "T" para tarde).
-Se não conseguir identificar ambas as informações, retorne null para o campo correspondente.
-
-Mensagem do usuário: "${mensagem}"
-
-Lembre-se: só retorne o objeto JSON, nada mais.
-`;
-
-const completion = await openai.chat.completions.create({
-model: "gpt-3.5-turbo",
-messages: [{ role: "user", content: prompt }],
-temperature: 0.2,
-max_tokens: 150
-});
-
-const resposta = completion.choices[0].message.content.trim();
-
-// Extrair apenas o JSON da resposta
-let jsonMatch = resposta.match(/\{[\s\S]*\}/);
-let jsonStr = jsonMatch ? jsonMatch[0] : resposta;
-
-// Tentar parsear o JSON
-const resultado = JSON.parse(jsonStr);
-
-// Validar resultado
-if (!resultado.data && !resultado.periodo) {
-return { data: null, periodo: null };
-}
-
-// Validar formato da data
-if (resultado.data && !/^\d{4}-\d{2}-\d{2}$/.test(resultado.data)) {
-// Tentar converter para formato correto se for uma data válida
-const dataObj = dayjs(resultado.data);
-if (dataObj.isValid()) {
-resultado.data = dataObj.format('YYYY-MM-DD');
-} else {
-resultado.data = null;
-}
-}
-
-// Validar período
-if (resultado.periodo) {
-if (typeof resultado.periodo === 'string') {
-// Normalizar para maiúsculas e pegar primeira letra
-const periodo = resultado.periodo.toUpperCase().trim();
-if (periodo === 'M' || periodo === 'MANHÃ' || periodo === 'MANHA' || periodo === 'MORNING') {
-resultado.periodo = 'M';
-} else if (periodo === 'T' || periodo === 'TARDE' || periodo === 'AFTERNOON') {
-resultado.periodo = 'T';
-} else {
-resultado.periodo = null;
-}
-} else {
-resultado.periodo = null;
-}
-}
-
-return {
-data: resultado.data || null,
-periodo: resultado.periodo || null
-};
-
-} catch (error) {
-console.error('Erro ao interpretar data e período:', error);
-return { data: null, periodo: null };
-}
-}
-
 module.exports = {
-interpretarMensagem,
 responderComBaseNaIntent,
 interpretarDataNatural,
 interpretaDataePeriodo,
-interpretaHora,
 interpretarNumeroOS,
 interpretarEscolhaOS,
 detectarIntentComContexto,
-gerarMensagemDaIntent,
-gerarTodasAsIntentsPrompt,
-encontraDataPeriodoIxc,
+gerarMensagemDaIntent
 };

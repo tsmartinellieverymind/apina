@@ -23,7 +23,8 @@ const {
   buscarClientePorCpf,
   buscarOSPorClienteId,
   atualizarOS,
-  gerarSugestoesDeAgendamento
+  gerarSugestoesDeAgendamento,
+  verificarDisponibilidade
 } = require('../services/ixcService');
 const {
   detectarIntentComContexto,
@@ -49,13 +50,10 @@ async function interpretaDataePeriodo({ mensagem, agentId = 'default-agent', dad
       return null;
     }
 
-    // Tenta extrair o período da mensagem
-    const periodoInterp = await interpretaPeriodo(mensagem, agentId, dados, promptExtra + 'Frase do usuário: "' + mensagem + '"');
-
-    // Retorna objeto com data e período
+   // Retorna objeto com data e período
     return {
-      data_interpretada: dataInterp,
-      periodo_interpretado: periodoInterp || 'T' // Default para tarde se não encontrou período
+      data_interpretada: dataInterp.data_interpretada,
+      periodo_interpretado: dataInterp.periodo_interpretado || 'T' // Default para tarde se não encontrou período
     };
   } catch (error) {
     console.error('Erro ao interpretar data e período:', error);
@@ -222,6 +220,114 @@ const geraDados = (user, mensagemAtual, observacao = '') => ({
   etapaAtual: user.etapaAtual,
   observacao
 });
+/* ---------------------------------------------------------
+   Funções auxiliares para processamento de OS
+--------------------------------------------------------- */
+
+/**
+ * Processa a escolha de uma OS com base na mensagem do usuário
+ * @param {Object} params - Parâmetros da função
+ * @param {string} params.mensagem - Mensagem do usuário
+ * @param {Object} params.contexto - Contexto da conversa
+ * @param {string} params.intent - Intent atual
+ * @param {Array} params.osList - Lista de OS disponíveis
+ * @returns {Object} - { osObj: Object, resposta: string }
+ */
+async function processarEscolhaOS({ mensagem, contexto, intent, osList }) {
+  if (!osList || osList.length === 0) {
+    return { resposta: 'Não há ordens de serviço disponíveis para agendamento.' };
+  }
+
+  try {
+    // Tenta extrair o número da OS da mensagem
+    const osPattern = /\b(\d{4,6})\b/; // Padrão para encontrar números de 4-6 dígitos (formato típico de OS)
+    const osMatch = mensagem.match(osPattern);
+    
+    if (osMatch) {
+      const osIdExtraido = osMatch[1];
+      console.log(`Número de OS extraído da mensagem: ${osIdExtraido}`);
+      
+      // Verificar se a OS existe na lista
+      const osEncontrada = osList.find(os => os.id === osIdExtraido);
+      if (osEncontrada) {
+        return { osObj: osEncontrada };
+      }
+    }
+    
+    // Se não encontrou pelo número, tenta interpretar a posição
+    const posicao = await interpretarEscolhaOS({
+      mensagem,
+      osList,
+      agentId: 'default-agent',
+      dados: contexto,
+      promptExtra: 'tente identificar a escolha da OS.'
+    });
+    
+    if (posicao && osList[posicao - 1]) {
+      return { osObj: osList[posicao - 1] };
+    }
+    
+    // Se não conseguiu identificar, retorna mensagem solicitando escolha
+    return { 
+      resposta: 'Não consegui identificar qual OS você deseja. Por favor, informe o número da OS que deseja agendar.'
+    };
+  } catch (error) {
+    console.error('Erro ao processar escolha de OS:', error);
+    return { 
+      resposta: 'Ocorreu um erro ao tentar identificar a OS. Por favor, informe o número da OS que deseja agendar.'
+    };
+  }
+}
+
+/**
+ * Verifica se existe uma OS selecionada e tenta encontrar uma no contexto se não existir
+ * @param {Object} user - Objeto do usuário
+ * @param {string} mensagemPersonalizada - Mensagem personalizada opcional
+ * @param {string} mensagem - Mensagem do usuário para tentar extrair o número da OS
+ * @param {Object} contexto - Contexto da conversa
+ * @param {string} intent - Intent atual
+ * @returns {Object} - { osExiste: boolean, resposta: string, osObj: Object }
+ */
+async function verificarOSEscolhida(user, mensagemPersonalizada = null, mensagem = null, contexto = null, intent = null) {
+  // Se já existe uma OS escolhida, retorna sucesso
+  if (user.osEscolhida) {
+    return { osExiste: true, osObj: user.osEscolhida };
+  }
+  
+  // Se temos mensagem, contexto e a lista de OS, tenta interpretar a OS da mensagem
+  if (mensagem && contexto && intent && user.osList && user.osList.length > 0) {
+    try {
+      console.log('Tentando identificar OS na mensagem:', mensagem);
+      const resultado = await processarEscolhaOS({
+        mensagem,
+        contexto,
+        intent,
+        osList: user.osList
+      });
+      
+      // Se encontrou uma OS, define no user e retorna sucesso
+      if (resultado.osObj) {
+        user.osEscolhida = resultado.osObj;
+        console.log('OS identificada automaticamente:', resultado.osObj.id);
+        return { osExiste: true, osObj: resultado.osObj };
+      }
+      
+      // Se não encontrou mas temos uma resposta personalizada do processamento
+      if (resultado.resposta) {
+        return { osExiste: false, resposta: resultado.resposta };
+      }
+    } catch (error) {
+      console.error('Erro ao tentar identificar OS na mensagem:', error);
+    }
+  }
+  
+  // Se não conseguiu identificar a OS ou não tinha informações suficientes
+  const mensagemPadrao = 'Para continuar, preciso saber qual ordem de serviço você deseja. Pode me informar o número da OS?';
+  return { 
+    osExiste: false, 
+    resposta: mensagemPersonalizada || mensagemPadrao 
+  };
+}
 
 /* ---------------------------------------------------------
    Rota principal – Webhook Twilio
@@ -272,12 +378,15 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
 
   /* -------------------- 1. Recupera/Cria sessão ------------------- */
   const user = usuarios[numero] ?? {
+    numero, // Garante que o número sempre está presente
     etapa: 'inicio', etapaAnterior: '', etapaAtual: 'inicio',
     mensagemAnteriorGPT: '', mensagemAnteriorCliente: '',
     cpf: null, clienteId: null, nomeCliente: null,
     osList: [], osEscolhida: null,           // osEscolhida é SEMPRE objeto
     dataInterpretada: null, periodoAgendamento: null
   };
+// Sempre sincroniza o número na sessão
+user.numero = numero;
 
   /* -------------------- 2. Gera contexto p/ LLM ------------------- */
   const dados = geraDados(user, mensagem);
@@ -521,6 +630,46 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           4.2 ALEATORIO
         -------------------------------------------------------------------- */
         case 'aleatorio': {if (!user.clienteId) { break;}
+          // Verificar se o usuário está respondendo a uma sugestão de OS
+          if (user.etapaAtual === 'escolher_os' && user.osList && user.osList.length > 0) {
+            // Tentar extrair o número da OS da mensagem do usuário
+            const osPattern = /\b(\d{4,6})\b/; // Padrão para encontrar números de 4-6 dígitos (formato típico de OS)
+            const osMatch = mensagem.match(osPattern);
+            
+            if (osMatch) {
+              const osIdExtraido = osMatch[1];
+              console.log(`Número de OS extraído da mensagem: ${osIdExtraido}`);
+              
+              // Verificar se a OS existe na lista do usuário
+              const osEncontrada = user.osList.find(os => os.id === osIdExtraido);
+              if (osEncontrada) {
+                // Definir a OS escolhida e atualizar a etapa
+                user.osEscolhida = osEncontrada;
+                user.etapaAtual = 'agendar_data';
+                user.etapaAnterior = 'escolher_os';
+                
+                // Gerar sugestões de agendamento para a OS escolhida
+                const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
+                user.sugestaoData = sugestoes.sugestao.data;
+                user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                
+                // Formatar a data e o período para a mensagem
+                const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
+                const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
+                // Capitalizar primeira letra do dia da semana
+                const diaSemanaCapitalizado = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1);
+                const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
+                const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                
+                resposta = `Ótimo! Vamos agendar a ${assunto}. ` +
+                          `Que tal ${diaSemanaCapitalizado}, dia ${dataFormatada}, no período da ${periodoExtenso}? ` +
+                          `Está bom para você ou prefere outra data?`;
+                break;
+              }
+            }
+          }
+          
+          // Se não for relacionado a uma sugestão de OS, continuar com o fluxo normal
           if (!user.cpf) {
             resposta = await gerarMensagemDaIntent({ intent, agentId: 'default-agent', dados: contexto, promptExtra: 'Peça o CPF.' });
           } else if (['verificar_os', 'escolher_os', 'agendar_data', 'extrair_data', 'extrair_hora', 'confirmar_agendamento'].includes(user.etapaAnterior)) {
@@ -570,37 +719,26 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           4.5 ESCOLHER OS
         -------------------------------------------------------------------- */
         case 'escolher_os': {if (!user.clienteId) { break;}
-          const idInterpretado = await interpretarNumeroOS({
+          const resultado = await processarEscolhaOS({
             mensagem,
-            agentId: 'default-agent',
-            dados: contexto,
-            osList: user.osList,
-            promptExtra: 'tente identificar o id da os.'
+            contexto,
+            intent,
+            osList: user.osList
           });
-          const osObj = user.osList.find(o => o.id === idInterpretado);
-
-          console.log('idInterpretado:', idInterpretado);
-
-          if (!osObj) {
-            resposta = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: `IMPORTANTE – A OS informada NÃO foi encontrada. 
-              • Peça novamente o número da OS OU sugira dizer “primeira”, “segunda”… se estiver listada.
-              • NÃO diga que o agendamento foi concluído.`
-            });
+          
+          if (resultado.resposta) {
+            resposta = resultado.resposta;
             break;
           }
-
+          
           // Define a OS escolhida
-          user.osEscolhida = osObj;
+          user.osEscolhida = resultado.osObj;
 
           // Verificar o status da OS selecionada
           if (user.osEscolhida.status === 'AG') {
             // OS já está agendada - perguntar se quer mais informações ou reagendar
             const dataAgendada = user.osEscolhida.data_agenda_final ? 
-                                dayjs(user.osEscolhida.data_agenda_final).format('DD/MM/YYYY') : 'data não definida';
+              dayjs(user.osEscolhida.data_agenda_final).format('DD/MM/YYYY') : 'data não definida';
             const periodoAgendado = user.osEscolhida.melhor_horario_agenda === 'M' ? 'manhã' : 'tarde';
             const diaSemanaAgendado = user.osEscolhida.data_agenda_final ? 
                                     diaDaSemanaExtenso(user.osEscolhida.data_agenda_final) : '';
@@ -669,9 +807,16 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
         }
 
         case 'datas_disponiveis': {if (!user.clienteId) { break;}
-          // Se não houver OS escolhida, pedir para selecionar
-          if (!user.osEscolhida) {
-            resposta = 'Para ver datas disponíveis, preciso saber qual ordem de serviço você deseja agendar. Pode me informar?';
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
+          const verificacao = await verificarOSEscolhida(
+            user, 
+            'Para ver datas disponíveis, preciso saber qual ordem de serviço você deseja agendar. Pode me informar?',
+            mensagem,
+            contexto,
+            intent
+          );
+          if (!verificacao.osExiste) {
+            resposta = verificacao.resposta;
             break;
           }
 
@@ -683,9 +828,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const diaSemanaAgendado = user.osEscolhida.data_agenda_final ? 
               diaDaSemanaExtenso(user.osEscolhida.data_agenda_final) : '';
             const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
-            resposta = `Você selecionou a OS ${user.osEscolhida.id} (${assunto}) que já está agendada para ${diaSemanaAgendado}, dia ${dataAgendada}, no período da ${periodoAgendado}.
-
-  O que você gostaria de fazer?`;
+            resposta = `Você selecionou a OS ${user.osEscolhida.id} (${assunto}) que já está agendada para ${diaSemanaAgendado}, dia ${dataAgendada}, no período da ${periodoAgendado}.\n\nO que você gostaria de fazer?`;
             break;
           }
 
@@ -758,14 +901,113 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
 
           user.dataInterpretada = dataInterp;
-          resposta = user.periodoAgendamento
-            ? `📅 Confirmo ${dayjs(dataInterp).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`
-            : await gerarMensagemDaIntent({
-              intent: 'extrair_hora',
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Agora escolha um período (manhã ou tarde).'
-            });
+          
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
+          if (!user.osEscolhida) {
+            const verificacao = await verificarOSEscolhida(
+              user,
+              'Para agendar, preciso saber qual ordem de serviço você deseja.',
+              mensagem,
+              contexto,
+              intent
+            );
+            
+            if (verificacao.osExiste) {
+              user.osEscolhida = verificacao.osObj;
+              console.log(`OS ${user.osEscolhida.id} identificada no extrair_data`);
+            }
+          }
+          
+          // Verificar se é final de semana usando a função verificarDisponibilidade
+          if (user.osEscolhida) {
+            console.log(`Verificando disponibilidade com verificarDisponibilidade: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}`);
+            const resultadoDisponibilidade = await verificarDisponibilidade(
+              user.osEscolhida, 
+              user.dataInterpretada, 
+              'M' // Verificamos apenas se a data é válida, o período é irrelevante neste ponto
+            );
+            
+            if (resultadoDisponibilidade.ehFinalDeSemana) {
+              const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+              const diaSemanaTexto = resultadoDisponibilidade.diaDaSemana;
+              resposta = `Desculpe, não realizamos agendamentos para finais de semana. A data ${dataFormatada} é um ${diaSemanaTexto}. Por favor, escolha uma data de segunda a sexta-feira.`;
+              // Limpar a data interpretada para que o usuário possa escolher outra
+              user.dataInterpretada = null;
+              break;
+            }
+          } else {
+            // Se não temos OS escolhida, fazemos a verificação tradicional
+            const diaDaSemana = dayjs(user.dataInterpretada).day(); // 0 = domingo, 6 = sábado
+            if (diaDaSemana === 0 || diaDaSemana === 6) {
+              const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+              const diaSemanaTexto = diaDaSemana === 0 ? 'domingo' : 'sábado';
+              resposta = `Desculpe, não realizamos agendamentos para finais de semana. A data ${dataFormatada} é um ${diaSemanaTexto}. Por favor, escolha uma data de segunda a sexta-feira.`;
+              // Limpar a data interpretada para que o usuário possa escolher outra
+              user.dataInterpretada = null;
+              break;
+            }
+          }
+
+          // Verificar se já temos período e OS para fazer o agendamento
+          if (user.periodoAgendamento && user.osList && user.osList.length > 0) {
+            // Se o usuário ainda não escolheu uma OS específica, mas só tem uma na lista, usamos ela
+            if (!user.osEscolhida && user.osList.length === 1) {
+              user.osEscolhida = user.osList[0];
+              console.log(`Auto-selecionando a única OS disponível: ${user.osEscolhida.id}`);
+            }
+            
+            // Se temos OS escolhida, data e período, verificamos a disponibilidade
+            if (user.osEscolhida) {
+              try {
+                console.log(`Verificando disponibilidade para: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}, Período=${user.periodoAgendamento}`);
+                
+                // Verificar disponibilidade usando a função gerarSugestoesDeAgendamento
+                const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                  dataEspecifica: user.dataInterpretada,
+                  periodoEspecifico: user.periodoAgendamento
+                });
+                
+                if (!sugestoes || !sugestoes.sugestao) {
+                  // Data/período não disponível
+                  const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                  const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+                  resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Gostaria de tentar outra data ou período?`;
+                  break;
+                }
+                
+                // Data/período disponível - pedir confirmação antes de agendar
+                const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+                const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+                const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                
+                resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}).
+
+Confirma o agendamento para essa data?`;
+                
+                // Armazenar a sugestão para uso posterior
+                user.sugestaoData = user.dataInterpretada;
+                user.sugestaoPeriodo = user.periodoAgendamento;
+                user.tipoUltimaPergunta = 'AGENDAMENTO';
+              } catch (error) {
+                console.error('Erro ao verificar disponibilidade:', error);
+                resposta = 'Desculpe, ocorreu um erro ao verificar a disponibilidade. Por favor, tente novamente mais tarde.';
+              }
+            } else {
+              // Temos data e período, mas não temos OS escolhida
+              resposta = `Entendi que você deseja agendar para ${dayjs(dataInterp).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Agora preciso saber qual OS você deseja agendar. Por favor, informe o número da OS.`;
+            }
+          } else {
+            // Se não temos período, pedir ao usuário
+            resposta = user.periodoAgendamento
+              ? `📅 Confirmo ${dayjs(dataInterp).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`
+              : await gerarMensagemDaIntent({
+                  intent: 'extrair_hora',
+                  agentId: 'default-agent',
+                  dados: contexto,
+                  promptExtra: 'Agora escolha um período (manhã ou tarde).'
+                });
+          }
           break;
         }
 
@@ -795,14 +1037,113 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
 
           user.periodoAgendamento = periodoInterp;
-          resposta = user.dataInterpretada
-            ? `📅 Confirmo ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`
-            : await gerarMensagemDaIntent({
-              intent: 'extrair_data',
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Agora informe a data.'
-            });
+          
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
+          if (!user.osEscolhida) {
+            const verificacao = await verificarOSEscolhida(
+              user,
+              'Para agendar, preciso saber qual ordem de serviço você deseja.',
+              mensagem,
+              contexto,
+              intent
+            );
+            
+            if (verificacao.osExiste) {
+              user.osEscolhida = verificacao.osObj;
+              console.log(`OS ${user.osEscolhida.id} identificada no extrair_hora`);
+            }
+          }
+          
+          // Verificar se já temos data e OS para fazer o agendamento
+          if (user.dataInterpretada && user.osList && user.osList.length > 0) {
+            // Se o usuário ainda não escolheu uma OS específica, mas só tem uma na lista, usamos ela
+            if (!user.osEscolhida && user.osList.length === 1) {
+              user.osEscolhida = user.osList[0];
+              console.log(`Auto-selecionando a única OS disponível: ${user.osEscolhida.id}`);
+            }
+            
+            // Se temos OS escolhida, data e período, verificamos a disponibilidade
+            if (user.osEscolhida) {
+              // Verificar se a data e período estão disponíveis
+              try {
+                console.log(`Verificando disponibilidade para: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}, Período=${user.periodoAgendamento}`);
+                
+                // Verificar disponibilidade usando a função verificarDisponibilidade
+                console.log(`Verificando disponibilidade com verificarDisponibilidade: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}, Período=${user.periodoAgendamento}`);
+                const resultadoDisponibilidade = await verificarDisponibilidade(
+                  user.osEscolhida, 
+                  user.dataInterpretada, 
+                  user.periodoAgendamento
+                );
+                
+                // Verificar se é final de semana
+                if (resultadoDisponibilidade.ehFinalDeSemana) {
+                  const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                  const diaSemanaTexto = resultadoDisponibilidade.diaDaSemana;
+                  resposta = `Desculpe, não realizamos agendamentos para finais de semana. A data ${dataFormatada} é um ${diaSemanaTexto}. Por favor, escolha uma data de segunda a sexta-feira.`;
+                  // Limpar a data interpretada para que o usuário possa escolher outra
+                  user.dataInterpretada = null;
+                  break;
+                }
+                
+                // Verificar disponibilidade
+                if (!resultadoDisponibilidade.disponivel) {
+                  // Data/período não disponível
+                  const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                  const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+                  
+                  // Verificar se existem outros períodos disponíveis para a mesma data
+                  if (resultadoDisponibilidade.periodosDisponiveis && resultadoDisponibilidade.periodosDisponiveis.length > 0) {
+                    const outrosPeriodos = resultadoDisponibilidade.periodosDisponiveis
+                      .map(p => p === 'M' ? 'manhã' : 'tarde')
+                      .join(' e ');
+                    resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Porém, temos disponibilidade no período da ${outrosPeriodos}. Gostaria de agendar nesse período?`;
+                  } else {
+                    resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Gostaria de tentar outra data ou período?`;
+                  }
+                  break;
+                }
+                
+                // Obter as sugestões para uso posterior
+                const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                  dataEspecifica: user.dataInterpretada,
+                  periodoEspecifico: user.periodoAgendamento
+                });
+                
+                // Data/período disponível - pedir confirmação antes de agendar
+                const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+                const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+                const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                
+                resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}).
+
+Confirma o agendamento para essa data?`;
+                
+                // Armazenar a sugestão para uso posterior
+                user.sugestaoData = user.dataInterpretada;
+                user.sugestaoPeriodo = user.periodoAgendamento;
+                user.tipoUltimaPergunta = 'AGENDAMENTO';
+                
+              } catch (error) {
+                console.error('Erro ao verificar disponibilidade:', error);
+                resposta = 'Desculpe, ocorreu um erro ao verificar a disponibilidade. Por favor, tente novamente mais tarde.';
+              }
+            } else {
+              // Temos data e período, mas não temos OS escolhida
+              resposta = `Entendi que você deseja agendar para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Agora preciso saber qual OS você deseja agendar. Por favor, informe o número da OS.`;
+            }
+          } else {
+            // Se não temos data, pedir ao usuário
+            resposta = user.dataInterpretada
+              ? `📅 Confirmo ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`
+              : await gerarMensagemDaIntent({
+                  intent: 'extrair_data',
+                  agentId: 'default-agent',
+                  dados: contexto,
+                  promptExtra: 'Agora informe a data.'
+                });
+          }
           break;
         }
 
@@ -811,8 +1152,16 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
         -------------------------------------------------------------------- */
         case 'alterar_periodo': {if (!user.clienteId) { break;}
 
-          if (!user.osEscolhida) {
-            resposta = 'Ops! Precisamos primeiro selecionar uma OS para alterar o período. Pode me dizer qual OS você deseja?';
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
+          const verificacao = await verificarOSEscolhida(
+            user, 
+            'Ops! Precisamos primeiro selecionar uma OS para alterar o período. Pode me dizer qual OS você deseja?',
+            mensagem,
+            contexto,
+            intent
+          );
+          if (!verificacao.osExiste) {
+            resposta = verificacao.resposta;
             break;
           }
 
@@ -851,10 +1200,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             break;
           }
 
-          // Formatar a data e o período para a mensagem
-          const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
-          const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
-          const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
+          // Formatar a data e o período para a mensagem usando os valores escolhidos pelo usuário
+          const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+          const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+          const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
           const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
 
           resposta = `Ótimo! Confirmando a alteração para ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}. Posso confirmar o agendamento?`;
@@ -890,36 +1239,21 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             }
           }
           
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
           if (!user.osEscolhida) {
-            // Se for reagendamento, pular a tentativa de interpretar a OS e mostrar as opções diretamente
-            if (isReagendamento) {
-              // Tentar extrair o número da OS da mensagem
-              const osPattern = /\b(\d{4,6})\b/; // Padrão para encontrar números de 4-6 dígitos (formato típico de OS)
-              const osMatch = mensagem.match(osPattern);
-              
-              if (osMatch && user.osList && user.osList.length > 0) {
-                const osIdExtraido = osMatch[1];
-                console.log(`Número de OS extraído da mensagem de reagendamento: ${osIdExtraido}`);
-                
-                // Verificar se a OS existe na lista do usuário
-                const osEncontrada = user.osList.find(os => os.id === osIdExtraido);
-                if (osEncontrada) {
-                  user.osEscolhida = osEncontrada;
-                  console.log(`OS ${osIdExtraido} encontrada para reagendamento: ${JSON.stringify(osEncontrada)}`);
-                }
-              }
-            } else {
-              // Tenta interpretar a OS normalmente
-              const posicao = await interpretarEscolhaOS({
-                mensagem,
-                osList: user.osList,
-                agentId: 'default-agent',
-                dados: contexto,
-                promptExtra: 'tente identificar a escolha da OS.'
-              });
-              if (posicao && user.osList && user.osList[posicao - 1]) {
-                user.osEscolhida = user.osList[posicao - 1];
-              }
+            const verificacao = await verificarOSEscolhida(
+              user,
+              isReagendamento 
+                ? 'Para reagendar, preciso saber qual ordem de serviço você deseja modificar.'
+                : 'Para agendar, preciso saber qual ordem de serviço você deseja.',
+              mensagem,
+              contexto,
+              intent
+            );
+            
+            if (verificacao.osExiste) {
+              user.osEscolhida = verificacao.osObj;
+              console.log(`OS ${user.osEscolhida.id} identificada para ${isReagendamento ? 'reagendamento' : 'agendamento'}`);
             }
 
             if (!user.osEscolhida) {
@@ -1020,7 +1354,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
            break;
           }
 
-          if (!user.osEscolhida) {
+          // Verificar se existe uma OS selecionada
+          const verificacao = await verificarOSEscolhida(user);
+          if (!verificacao.osExiste) {
             let msg = 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
             if (user.osList && user.osList.length > 0) {
               const abertas = user.osList.filter(os => os.status === 'A');
@@ -1071,21 +1407,27 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
         }
 
         /* --------------------------------------------------------------------
-          4.9 CONFIRMAR AGENDAMENTO
+          4.9 CONSULTAR DISPONIBILIDADE DATA
         -------------------------------------------------------------------- */
         case 'consultar_disponibilidade_data': {if (!user.clienteId) { break;}
-          // Verificar se o usuário tem uma OS escolhida
-          if (!user.osEscolhida) {
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
+          const verificacao = await verificarOSEscolhida(
+            user,
+            null,
+            mensagem,
+            contexto,
+            intent
+          );
+          if (!verificacao.osExiste) {
             resposta = await gerarMensagemDaIntent({
               intent: 'aleatorio',
               agentId: 'default-agent',
               dados: contexto,
-              extraData: 'Precisamos escolher uma OS antes de verificar a disponibilidade.'
+              promptExtra: 'O usuário precisa escolher uma OS antes de consultar disponibilidade.'
             });
             break;
           }
-
-          // Interpretar a data solicitada pelo usuário
+          
           const dataInterp = await interpretarDataNatural(mensagem, 'default-agent', contexto, 'Frase do usuário: "' + mensagem + '"');
           console.log('====== DATA SOLICITADA PARA VERIFICAÇÃO: ======');
           console.log(dataInterp);
@@ -1206,9 +1548,16 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           console.log("================== user.osEscolhida ==================")  
           console.log("==================" + user.osEscolhida + "=============================")
           console.log("==================" + !user.osEscolhida + "=============================")
-          if (!user.osEscolhida) {
-            
-          console.log("================== user.osEscolhida Entro ==================")  
+          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
+          const verificacao = await verificarOSEscolhida(
+            user,
+            null,
+            mensagem,
+            contexto,
+            intent
+          );
+          if (!verificacao.osExiste) {
+            // Mostrar lista de OS disponíveis
             let msg = 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
             if (user.osList && user.osList.length > 0) {
               const abertas = user.osList.filter(os => os.status === 'A');
@@ -1248,6 +1597,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               if (interpretado.periodo_interpretado) user.periodoAgendamento = interpretado.periodo_interpretado;
             }
           }
+          
           // Tenta preencher com sugestão prévia se ainda faltar algum
           if ((!user.dataInterpretada || !user.periodoAgendamento) && user.sugestaoData && user.sugestaoPeriodo) {
             if (!user.dataInterpretada) user.dataInterpretada = user.sugestaoData;
@@ -1274,8 +1624,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           
           // Criar o payload com os dados básicos - a função atualizarOS vai calcular as datas corretas
           const payload = {
-            ...user.osEscolhida,
-            data_agenda_final: dataAgendamento, // Formato correto: YYYY-MM-DD HH:MM:SS
+           ...user.osEscolhida,
+             data_agenda_final: dataAgendamento, // Formato correto: YYYY-MM-DD HH:MM:SS
             melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
           };
           
@@ -1348,6 +1698,32 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             resposta = 'Ops! Parece que não temos nenhuma OS aberta. Tente novamente mais tarde.';
             break;
           }
+          
+          // Verificar se já existe uma OS selecionada
+          const verificacao = await verificarOSEscolhida(user, null);
+          if (verificacao.osExiste) {
+            // Se já tem OS escolhida, mostra os detalhes dela diretamente
+            const os = user.osEscolhida;
+            let dataFormatada = null;
+            if (os.data_agenda_final && os.data_agenda_final !== '0000-00-00 00:00:00') {
+              const dataObj = dayjs(os.data_agenda_final);
+              const dia = dataObj.format('DD');
+              const mes = dataObj.format('MMMM'); // Nome do mês por extenso
+              const periodo = os.melhor_horario_agenda === 'M' ? 'manhã' : 'tarde';
+              dataFormatada = `dia ${dia} do mês de ${mes} no período da ${periodo}`;
+            }
+            resposta = `Opa! Prontinho! Aqui estão os detalhes da sua OS ${os.id}:
+          • Assunto: ${os.titulo || os.mensagem || 'Sem descrição'}
+          • Status: ${os.status === 'AG' ? 'Agendada' : os.status === 'A' ? 'Aberta' : os.status}
+          ${dataFormatada ? `• Data agendada: ${dataFormatada}\n` : ''}${os.endereco ? `• Endereço: ${os.endereco}\n` : ''}Se precisar de mais alguma coisa, é só me chamar! 😊`;
+            
+            Object.keys(user).forEach(key => {
+              if (!['cpf', 'clienteId', 'numero', 'nomeCliente'].includes(key)) {
+                delete user[key];
+              }
+            });
+            break;
+          }
 
           const idInterpretado = await interpretarNumeroOS({
             mensagem,
@@ -1395,8 +1771,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           4.5.1 CONFIRMAR ESCOLHA OS
         -------------------------------------------------------------------- */
         case 'confirmar_escolha_os': {if (!user.clienteId) { break;}
-          // Se não houver OS escolhida, tentar identificar a última OS apresentada
-          if (!user.osEscolhida) {
+          // Verificar se existe uma OS selecionada
+          const verificacao = await verificarOSEscolhida(user, null, mensagem, contexto, intent);
+          if (!verificacao.osExiste) {
             // Tenta pegar a última OS apresentada ao usuário
             if (user.osList && user.osList.length === 1) {
               user.osEscolhida = user.osList[0];
@@ -1476,7 +1853,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
     user.etapaAtual = intent;                      // <- atualiza para a nova intent
     user.mensagemAnteriorGPT = resposta;
     user.mensagemAnteriorCliente = mensagem;
-    usuarios[numero] = user;
+    user.numero = numero; // Garante que o número sempre está presente
+usuarios[numero] = user;
 
     /* -------------------- 7. Envia WhatsApp ------------------------ */
     const twilioWhatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
@@ -1486,6 +1864,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
       return res.status(500).send('Erro de configuração do servidor: TWILIO_WHATSAPP_NUMBER não definido.');
     }
 
+    if (!numero) {
+      console.error('❌ ERRO: número do destinatário está undefined. Não é possível enviar mensagem.');
+      return res.status(500).send('Erro interno: número do destinatário não encontrado na sessão.');
+    }
     let messageData = {
       to: numero,
       from: twilioWhatsappNumber
@@ -1538,8 +1920,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
     try {
       const twilioWhatsappNumberFallback = process.env.TWILIO_WHATSAPP_NUMBER;
       if (twilioWhatsappNumberFallback) {
-        await enviarMensagemWhatsApp({
-          to: numero,
+        if (!numero) {
+           console.error('❌ ERRO: número do destinatário está undefined. Não é possível enviar mensagem de erro.');
+           return;
+         }
+         await enviarMensagemWhatsApp({
+           to: numero,
           from: twilioWhatsappNumberFallback,
           body: 'Desculpe, ocorreu um erro interno ao processar sua solicitação. Tente novamente mais tarde.'
         });

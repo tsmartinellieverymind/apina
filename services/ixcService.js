@@ -62,7 +62,7 @@ async function buscarOSPorClienteId(clienteId) {
     });
 
     const registros = response.data?.registros || [];
-    console.log('📦 OS encontradas por clienteId:', registros);
+    //console.log('📦 OS encontradas por clienteId:', registros);
     return registros;
   } catch (error) {
     console.error('❌ Erro ao buscar OS por clienteId:', error);
@@ -121,7 +121,7 @@ async function atualizarOS(osId, payloadOriginal) {
   payload.status = 'AG';
 
   console.log('📦 Payload enviado para o IXC (atualizarOS):');
-  console.dir(payload, { depth: null });
+  //console.dir(payload, { depth: null });
 
   const response = await api.put(`/su_oss_chamado/${osId}`, payload, {
     headers: { ixcsoft: '' }
@@ -598,36 +598,36 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     // 3. Extrair o setor da OS e seu limite de instalações
     const setor = String(os.id_setor || os.setor_id || os.setor);
     const limiteInstalacoesPorSetor = vinculoSetoresTipo[setor] || "1";
-    console.log(`[MOCK] Setor da OS: ${setor}, Limite de instalações por técnico/dia: ${limiteInstalacoesPorSetor}`);
+    //console.log(`[MOCK] Setor da OS: ${setor}, Limite de instalações por técnico/dia: ${limiteInstalacoesPorSetor}`);
 
     // 4. Filtrar técnicos vinculados ao setor da OS
     const tecnicosDoSetor = vinculos[setor] || [];
-    console.log(`[MOCK][DEBUG] Buscando técnicos para o setor ${setor} nos vínculos:`, JSON.stringify(vinculos, null, 2));
+    //console.log(`[MOCK][DEBUG] Buscando técnicos para o setor ${setor} nos vínculos:`, JSON.stringify(vinculos, null, 2));
     if (tecnicosDoSetor.length === 0) {
-      console.log(`[MOCK] Nenhum técnico encontrado para o setor ${setor}`);
+      //console.log(`[MOCK] Nenhum técnico encontrado para o setor ${setor}`);
       return { sugestao: null, alternativas: [] };
     }
-    console.log(`[MOCK] Técnicos do setor ${setor}: ${tecnicosDoSetor.join(', ')}`);
+    //console.log(`[MOCK] Técnicos do setor ${setor}: ${tecnicosDoSetor.join(', ')}`);
 
     // 5. Obter configuração de SLA para o assunto da OS
-    console.log(`[MOCK][DEBUG] Buscando configuração para id_assunto: ${os.id_assunto}`);
-    console.log(`[MOCK][DEBUG] Configurações disponíveis:`, JSON.stringify(configuracoesAgendamento, null, 2));
+    //console.log(`[MOCK][DEBUG] Buscando configuração para id_assunto: ${os.id_assunto}`);
+    //console.log(`[MOCK][DEBUG] Configurações disponíveis:`, JSON.stringify(configuracoesAgendamento, null, 2));
     
     const config = configuracoesAgendamento.find(c => String(c.id_assunto) === String(os.id_assunto)) || configuracoesAgendamento[0];
-    console.log(`[MOCK][DEBUG] Configuração encontrada:`, JSON.stringify(config, null, 2));
+    //console.log(`[MOCK][DEBUG] Configuração encontrada:`, JSON.stringify(config, null, 2));
     
     const diasMin = config.dataMinimaAgendamentoDias || 1;
     const diasMax = config.dataMaximaAgendamentoDias || 7;
     const limiteManha = config.limiteManha || 2;
     const limiteTarde = config.limiteTarde || 3;
     
-    console.log(`[MOCK][DEBUG] Valores usados: diasMin=${diasMin}, diasMax=${diasMax}, limiteManha=${limiteManha}, limiteTarde=${limiteTarde}`);
+    //console.log(`[MOCK][DEBUG] Valores usados: diasMin=${diasMin}, diasMax=${diasMax}, limiteManha=${limiteManha}, limiteTarde=${limiteTarde}`);
 
     // Calcular range de datas válidas para agendamento com base na configuração
     const dataMin = hoje.add(diasMin, 'day').format('YYYY-MM-DD');
     const dataMax = hoje.add(diasMax, 'day').format('YYYY-MM-DD');
-    console.log(`[MOCK][DEBUG] Data mínima para agendamento: ${dataMin}`);
-    console.log(`[MOCK][DEBUG] Data máxima para agendamento: ${dataMax}`);
+    //console.log(`[MOCK][DEBUG] Data mínima para agendamento: ${dataMin}`);
+    //console.log(`[MOCK][DEBUG] Data máxima para agendamento: ${dataMax}`);
     
     // Montar ocupação dos técnicos usando mockOrdensTecnicoOcupado, apenas se a data da OS mock estiver dentro do range
     if (mockOrdensTecnicoOcupado && Array.isArray(mockOrdensTecnicoOcupado.registros)) {
@@ -729,7 +729,7 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
       opcao.total_instalacoes = totalInstalacoesNessaData;
       opcao.limite_instalacoes = limiteInstalacoes;
       
-      console.log(`[MOCK][DEBUG] Opção ${data} - ${opcao.periodo} - Técnico ${idTecnico} - Limite de instalação atingido: ${opcao.limite_instalacao_atingido} (${totalInstalacoesNessaData}/${limiteInstalacoes})`);
+      //console.log(`[MOCK][DEBUG] Opção ${data} - ${opcao.periodo} - Técnico ${idTecnico} - Limite de instalação atingido: ${opcao.limite_instalacao_atingido} (${totalInstalacoesNessaData}/${limiteInstalacoes})`);
     }
     
     // Determinar o tipo de serviço para a OS atual
@@ -741,12 +741,12 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     const todasOpcoesOriginal = [...todasOpcoes]; // Guardar todas as opções antes do filtro
     
     if (tipoServico === 'instalacao') {
-      console.log(`[MOCK][INFO] Filtrando opções para instalação - antes: ${todasOpcoes.length} opções`);
+      //console.log(`[MOCK][INFO] Filtrando opções para instalação - antes: ${todasOpcoes.length} opções`);
       todasOpcoes = todasOpcoes.filter(opcao => opcao.limite_instalacao_atingido === false);
-      console.log(`[MOCK][INFO] Após filtro de instalação - restaram: ${todasOpcoes.length} opções`);
+      //console.log(`[MOCK][INFO] Após filtro de instalação - restaram: ${todasOpcoes.length} opções`);
     } else {
       // Para manutenção, não aplicamos o filtro de limite de instalação
-      console.log(`[MOCK][INFO] Não aplicando filtro de limite de instalação para manutenção`);
+      //console.log(`[MOCK][INFO] Não aplicando filtro de limite de instalação para manutenção`);
     }
     
     // 8. Ordenar opções por data, período preferido e ocupação
@@ -772,10 +772,10 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     }
 
     // Log de depuração detalhado
-    console.log('[MOCK][DEBUG] Ocupação:', JSON.stringify(ocupacao, null, 2));
-    console.log('[MOCK][DEBUG] Todas as opções consideradas:', JSON.stringify(todasOpcoes, null, 2));
-    console.log('[MOCK][DEBUG] Sugestão principal:', JSON.stringify(sugestao, null, 2));
-    console.log('[MOCK][DEBUG] Alternativas:', JSON.stringify(alternativas.slice(0, 5), null, 2)); // Mostrar apenas as 5 primeiras alternativas no log
+    //console.log('[MOCK][DEBUG] Ocupação:', JSON.stringify(ocupacao, null, 2));
+    //console.log('[MOCK][DEBUG] Todas as opções consideradas:', JSON.stringify(todasOpcoes, null, 2));
+    //console.log('[MOCK][DEBUG] Sugestão principal:', JSON.stringify(sugestao, null, 2));
+    //console.log('[MOCK][DEBUG] Alternativas:', JSON.stringify(alternativas.slice(0, 5), null, 2)); // Mostrar apenas as 5 primeiras alternativas no log
     return {
       sugestao,
       alternativas
@@ -785,10 +785,6 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     console.error('[MOCK] Erro ao gerar sugestões de agendamento:', error);
     return {
       sugestao: null,
-      alternativas: []
-    };
-  }
-}
 
 /**
  * Verifica se uma data e período específicos estão disponíveis para agendamento
@@ -799,6 +795,26 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
  * @returns {Object} Resultado da verificação contendo disponibilidade e outras informações
  */
 async function verificarDisponibilidade(os, dataString, periodo, opcoes = {}) {
+  // Verificar se a data é um final de semana
+  const dataObj = dayjs(dataString);
+  const diaDaSemana = dataObj.day(); // 0 = domingo, 6 = sábado
+  const ehFinalDeSemana = diaDaSemana === 0 || diaDaSemana === 6;
+  
+  if (ehFinalDeSemana) {
+    console.log(`Data ${dataString} é um final de semana (${diaDaSemana === 0 ? 'domingo' : 'sábado'}). Não disponível para agendamento.`);
+    return {
+      disponivel: false,
+      dentroDoRange: false,
+      ehFinalDeSemana: true,
+      diaDaSemana: diaDaSemana === 0 ? 'domingo' : 'sábado',
+      dataMinima: null,
+      dataMaxima: null,
+      periodosDisponiveis: [],
+      opcoesPorData: {},
+      todasOpcoes: []
+    };
+  }
+  
   // Obter as sugestões de agendamento para a OS
   const resultado = await gerarSugestoesDeAgendamento(os, {
     ...opcoes,
@@ -842,6 +858,7 @@ async function verificarDisponibilidade(os, dataString, periodo, opcoes = {}) {
   return {
     disponivel: periodoDisponivel,
     dentroDoRange,
+    ehFinalDeSemana: false,
     dataMinima,
     dataMaxima,
     periodosDisponiveis,
