@@ -11,7 +11,7 @@ function logEstado({ numero, user, intent, resposta }) {
     nomeCliente: user.nomeCliente,
     osEscolhida: user.osEscolhida?.id || null,
     dataInterpretada: user.dataInterpretada,
-    periodo: user.periodo
+    periodo: user.periodoAgendamento // Usando a propriedade correta periodoAgendamento
   };
 
   // Todos os atributos restantes do user (exceto os já destacados)

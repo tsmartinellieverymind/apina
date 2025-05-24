@@ -156,20 +156,8 @@ const usuarios = {}; // { [numeroWhatsapp]: userState }
    Helpers utilitários
 --------------------------------------------------------- */
 const extrairCpf = (texto = '') => {
-  // Verifica se o texto se parece com um CPF no formato padrão (com ou sem pontuação)
   const m = texto.match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/);
-  
-  if (!m) return null;
-  
-  const cpfLimpo = m[0].replace(/[^\d]/g, '');
-  
-  // CPF sempre tem 11 dígitos - OS geralmente tem menos ou mais dígitos
-  if (cpfLimpo.length !== 11) return null;
-  
-  // Verifica se os dígitos não são todos iguais (validação básica)
-  if (/^(\d)\1{10}$/.test(cpfLimpo)) return null;
-  
-  return cpfLimpo;
+  return m ? m[0].replace(/[^\d]/g, '') : null;
 };
 const gerarPromptContextualizado = dados => {
   const l = [];
@@ -446,18 +434,7 @@ user.numero = numero;
         case 'extrair_cpf':{
           resposta = user._respostaCPF;
           const cpf = extrairCpf(mensagem);
-          
-          // Verificar se o usuário pode estar tentando informar um número de OS em vez de CPF
-          const possibleOsNumber = mensagem.replace(/[^\d]/g, '');
-          const isLikelyOsNumber = possibleOsNumber.length !== 11 && possibleOsNumber.length > 0;
-          
-          if (!cpf) { 
-            if (isLikelyOsNumber) {
-              resposta = 'Parece que você digitou um número que pode ser uma OS. Para confirmar, por favor me informe seu CPF primeiro (11 dígitos, ex: 12345678900 ou 123.456.789-00), e depois poderei verificar suas ordens de serviço.';
-            } else {
-              resposta = 'Parece que o formato do CPF não está correto. Por favor, digite novamente com 11 dígitos (ex: 12345678900 ou 123.456.789-00).';
-            }
-          }
+          if (!cpf) { resposta = 'Parece que o formato do CPF não está correto. Por favor, digite novamente com 11 dígitos (ex: 12345678900 ou 123.456.789-00).'; }
     
           user.cpf = cpf;
           let osAbertas = [];
@@ -512,7 +489,7 @@ user.numero = numero;
             if (osAbertas.length === 1) {
               user.osEscolhida = osAbertas[0];
               const osInfo = `• ${user.osEscolhida.id} - ${user.osEscolhida.titulo || user.osEscolhida.mensagem || 'Sem descrição'}`;
-              partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nJá selecionei essa OS para você. Para quando gostaria de agendar a visita? (ex: segunda-feira a tarde, dia 25 pela manhã)`);
+              partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nJá selecionei essa OS para você. Para quando gostaria de agendar a visita? (ex: amanhã, segunda-feira, dia 25)`);
               user.etapaAtual = 'agendar_data';
             } else if (osAbertas.length > 1) {
               const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
@@ -1116,7 +1093,6 @@ Confirma o agendamento para essa data?`;
                 user.sugestaoData = user.dataInterpretada;
                 user.sugestaoPeriodo = user.periodoAgendamento;
                 user.tipoUltimaPergunta = 'AGENDAMENTO';
-                user.aguardandoConfirmacao = true; // Flag para indicar que estamos aguardando confirmação
               } catch (error) {
                 console.error('Erro ao verificar disponibilidade:', error);
                 resposta = 'Desculpe, ocorreu um erro ao verificar a disponibilidade. Por favor, tente novamente mais tarde.';
@@ -1183,16 +1159,6 @@ Confirma o agendamento para essa data?`;
           }
           
           // Verificar se já temos data e OS para fazer o agendamento
-          // PRIMEIRO, VERIFICAR SE TEMOS A DATA. SE NÃO, PEDIR.
-          if (!user.dataInterpretada) {
-            const periodoExtensoUser = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-            resposta = `Entendi que você prefere o período da ${periodoExtensoUser}. Para qual data seria o agendamento?`;
-            // Manter a etapa para que o próximo input seja processado como extrair_data ou agendar_data
-            user.etapaAtual = 'extrair_data'; // Ou 'agendar_data' dependendo do fluxo desejado
-            break;
-          }
-
-          // SE TEMOS A DATA, CONTINUAR COM A VERIFICAÇÃO DE OS E DISPONIBILIDADE
           if (user.dataInterpretada && user.osList && user.osList.length > 0) {
             // Se o usuário ainda não escolheu uma OS específica, mas só tem uma na lista, usamos ela
             if (!user.osEscolhida && user.osList.length === 1) {
@@ -1262,7 +1228,6 @@ Confirma o agendamento para essa data?`;
                 user.sugestaoData = user.dataInterpretada;
                 user.sugestaoPeriodo = user.periodoAgendamento;
                 user.tipoUltimaPergunta = 'AGENDAMENTO';
-                user.aguardandoConfirmacao = true; // Flag para indicar que estamos aguardando confirmação
                 
               } catch (error) {
                 console.error('Erro ao verificar disponibilidade:', error);
@@ -1362,23 +1327,6 @@ Confirma o agendamento para essa data?`;
                                 msgLower.includes('alterar') || 
                                 msgLower.includes('trocar') || 
                                 msgLower.includes('outra data');
-
-          let empatiaPrefixo = ""; 
-          if (isReagendamento || intent === 'alterar_periodo') {
-            const palavrasChaveSensivel = [
-              'luto', 'funeral', 'enterro', 'falecimento', 'doente', 
-              'doença', 'hospital', 'emergência', 'urgência médica', 
-              'mal estar', 'imprevisto grave', 'problema pessoal', 'falecido', 'velório'
-            ];
-            // Ensure msgLower is used for keyword checking as it's already lowercased
-            const encontrouPalavraSensivel = palavrasChaveSensivel.some(palavra => msgLower.includes(palavra));
-
-            if (encontrouPalavraSensivel) {
-              empatiaPrefixo = "Sinto muito por essa situação delicada. Vamos encontrar um novo horário para você sem problemas. ";
-              // Log message adjusted to reflect the broader condition
-              console.log(`[INFO] Situação sensível detectada para ${intent === 'alterar_periodo' ? 'alteração de período' : 'reagendamento'}: ${mensagem}`);
-            }
-          }
           
           // Se for um pedido de reagendamento e a lista de OS estiver vazia, recarregar a lista
           if (isReagendamento && (!user.osList || user.osList.length === 0) && user.clienteId) {
@@ -1410,12 +1358,11 @@ Confirma o agendamento para essa data?`;
             if (verificacao.osExiste) {
               user.osEscolhida = verificacao.osObj;
               console.log(`OS ${user.osEscolhida.id} identificada para ${isReagendamento ? 'reagendamento' : 'agendamento'}`);
-            } // This closes: if (verificacao.osExiste)
+            }
 
-            // This 'if' block is part of the missing code, checking if OS is *still* not chosen
-            if (!user.osEscolhida) { 
+            if (!user.osEscolhida) {
               let msg = isReagendamento 
-                ? `${empatiaPrefixo}Para reagendar, preciso saber qual ordem de serviço você deseja modificar. Aqui estão suas OS:`
+                ? 'Para reagendar, preciso saber qual ordem de serviço você deseja modificar. Aqui estão suas OS:'
                 : 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
               if (user.osList && user.osList.length > 0) {
                 const abertas = user.osList.filter(os => os.status === 'A');
@@ -1435,12 +1382,13 @@ Confirma o agendamento para essa data?`;
                 msg += '\nSe quiser, é só me dizer o número da OS ou a posição na lista! 😊';
               }
               resposta = msg;
-              break; 
+              break;
             }
-          } // This closes the 'if (!user.osEscolhida)' block from original line 1398 where OS is identified/asked for.
+          }
 
           // NOVO FLUXO: Se já temos a OS escolhida, sugerir imediatamente as datas disponíveis
-          if (user.osEscolhida) { // This is the crucial conditional
+          if (user.osEscolhida) {
+            // Chama gerarSugestoesDeAgendamento para sugerir datas
             const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
             user.sugestoesAgendamento = sugestoes;
 
@@ -1452,13 +1400,6 @@ Confirma o agendamento para essa data?`;
             // Formatar mensagem com sugestão principal e até 3 alternativas
             const dataSug = sugestoes.sugestao.data;
             const periodoSug = sugestoes.sugestao.periodo;
-
-            // Armazenar a sugestão principal para uso na confirmação
-            user.sugestaoData = dataSug;
-            user.sugestaoPeriodo = periodoSug;
-            user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO'; // Indica que uma sugestão foi feita
-            console.log(`[DEBUG] Sugestão principal armazenada para confirmação: Data=${user.sugestaoData}, Período=${user.sugestaoPeriodo}`);
-
             const dataFormatada = dayjs(dataSug).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(dataSug);
             const periodoExtenso = periodoSug === 'M' ? 'manhã' : 'tarde';
@@ -1486,7 +1427,7 @@ Confirma o agendamento para essa data?`;
               }).join('\n');
             }
 
-            resposta = `${empatiaPrefixo}Ótimo! Tenho uma sugestão para sua visita de ${assunto}! ` +
+            resposta = `Ótimo! Tenho uma sugestão para sua visita de ${assunto}! ` +
               `Que tal ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}?` +
               (alternativas ? `\n\nSe preferir, também tenho:\n${alternativas}` : '') +
               `\n\nEstá bom para você ou prefere outra opção? Se preferir, posso verificar outras datas disponíveis.`;
@@ -1743,49 +1684,29 @@ Confirma o agendamento para essa data?`;
             break;
           }
 
-          // 1. Definir data e período para esta tentativa de confirmação.
-          let dataConfirmacao = null;
-          let periodoConfirmacao = null;
-          console.log('[DEBUG] confirmar_agendamento: Tentando extrair data/período da mensagem atual:', mensagem);
-
-          // 2. Tentar extrair data e período da mensagem de confirmação do usuário.
-          const interpretadoDaMensagem = await interpretaDataePeriodo({
-            mensagem,
-            agentId: 'default-agent',
-            dados: contexto,
-            promptExtra: 'Tente identificar data e/ou período para o agendamento na mensagem de confirmação.'
-          });
-
-          if (interpretadoDaMensagem) {
-            if (interpretadoDaMensagem.data_interpretada && dayjs(interpretadoDaMensagem.data_interpretada).isValid()) {
-              dataConfirmacao = interpretadoDaMensagem.data_interpretada;
-              console.log('[DEBUG] confirmar_agendamento: Data extraída da mensagem de confirmação:', dataConfirmacao);
-            }
-            if (interpretadoDaMensagem.periodo_interpretado) {
-              periodoConfirmacao = interpretadoDaMensagem.periodo_interpretado;
-              console.log('[DEBUG] confirmar_agendamento: Período extraído da mensagem de confirmação:', periodoConfirmacao);
+          // Verificar se temos dados de data/período na etapa anterior (caso o usuário tenha escolhido outra data/período)
+          // Manter a data e período escolhidos pelo usuário se já existirem
+          // Tentar interpretar a mensagem para extrair data ou período, se algum estiver faltando
+          if (!user.dataInterpretada || !user.periodoAgendamento) {
+            let interpretado = null;
+            // Se não temos ambos, tenta extrair da mensagem
+            interpretado = await interpretaDataePeriodo({
+              mensagem,
+              agentId: 'default-agent',
+              dados: contexto,
+              promptExtra: 'Tente identificar data e/ou período para o agendamento.'
+            });
+            if (interpretado) {
+              if (interpretado.data_interpretada) user.dataInterpretada = interpretado.data_interpretada;
+              if (interpretado.periodo_interpretado) user.periodoAgendamento = interpretado.periodo_interpretado;
             }
           }
-
-          // 3. Se data ou período ainda estiverem faltando E uma sugestão foi feita anteriormente (`AGENDAMENTO_SUGESTAO`), usar a sugestão.
-          if ((!dataConfirmacao || !periodoConfirmacao) &&
-              user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO' &&
-              user.sugestaoData && user.sugestaoPeriodo) {
-            console.log('[DEBUG] confirmar_agendamento: Usando sugestão anterior pois data/período não foram totalmente extraídos da mensagem atual ou são inválidos.');
-            if (!dataConfirmacao && user.sugestaoData && dayjs(user.sugestaoData).isValid()) {
-              dataConfirmacao = user.sugestaoData;
-              console.log('[DEBUG] confirmar_agendamento: Usando user.sugestaoData:', dataConfirmacao);
-            }
-            if (!periodoConfirmacao && user.sugestaoPeriodo) {
-              periodoConfirmacao = user.sugestaoPeriodo;
-              console.log('[DEBUG] confirmar_agendamento: Usando user.sugestaoPeriodo:', periodoConfirmacao);
-            }
+          
+          // Tenta preencher com sugestão prévia se ainda faltar algum
+          if ((!user.dataInterpretada || !user.periodoAgendamento) && user.sugestaoData && user.sugestaoPeriodo) {
+            if (!user.dataInterpretada) user.dataInterpretada = user.sugestaoData;
+            if (!user.periodoAgendamento) user.periodoAgendamento = user.sugestaoPeriodo;
           }
-
-          // Atualizar o estado do usuário com a data e período definidos para esta confirmação.
-          user.dataInterpretada = dataConfirmacao;
-          user.periodoAgendamento = periodoConfirmacao;
-          console.log(`[DEBUG] confirmar_agendamento: Data para confirmação final: ${user.dataInterpretada}, Período: ${user.periodoAgendamento}`);
           // Agora, decide o que pedir para o usuário
           if (!user.dataInterpretada && !user.periodoAgendamento) {
             resposta = 'Preciso que você me informe a data e o período para agendarmos.';
@@ -1800,23 +1721,7 @@ Confirma o agendamento para essa data?`;
             break;
           }
 
-          // Verificar se estamos esperando confirmação ou se o usuário já confirmou
-          if (!user.aguardandoConfirmacao) {
-            // Se não estamos aguardando confirmação, perguntar ao usuário para confirmar
-            const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
-            const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
-            const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
-            
-            resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}).
-
-Confirma o agendamento para essa data?`;
-            
-            user.aguardandoConfirmacao = true;
-            break;
-          }
-          
-          // Se passou aqui, temos tudo: OS + data + período e o usuário confirmou
+          // Se passou aqui, temos tudo: OS + data + período
           // Definir horário padrão com base no período (manhã = 09:00:00, tarde = 14:00:00)
           const horarioPadrao = user.periodoAgendamento === 'M' ? '09:00:00' : '14:00:00';
           const dataAgendamento = `${user.dataInterpretada} ${horarioPadrao}`; // Formato: YYYY-MM-DD HH:MM:SS

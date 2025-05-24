@@ -242,13 +242,13 @@ async function buscarClientePorCpf(cpf) {
 
     const registros = response.data?.registros;
     if (!registros || Object.keys(registros).length === 0) {
-      return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado.` };
+      return { mensagem: `Não encontrei nenhum cliente com o CPF ${cpfFormatado} em nosso sistema. Poderia verificar se o número está correto e tentar novamente?` };
     }
 
     const cliente = Object.values(registros).find(c => (c.cnpj_cpf || '').trim() === cpfFormatado);
 
     if (!cliente) {
-      return { mensagem: `❌ Cliente com CPF ${cpfFormatado} não encontrado com correspondência exata.` };
+      return { mensagem: `Não encontrei nenhum cliente com o CPF ${cpfFormatado} em nosso sistema. Poderia verificar se o número está correto e tentar novamente?` };
     }
 
     return { mensagem: '✅ Cliente encontrado', cliente };
@@ -561,7 +561,7 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
 }
 
 // Modo Mock
-const MOCK_MODE = true; // Defina como true para usar dados mockados, false para API real
+const MOCK_MODE = false; // Defina como true para usar dados mockados, false para API real
 const TODOS_TECNICOS_ATIVOS = true; // No modo mock, define se todos os técnicos devem ser considerados ativos
 
 async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
@@ -785,6 +785,10 @@ async function gerarSugestoesDeAgendamentoMock(os, opcoes = {}) {
     console.error('[MOCK] Erro ao gerar sugestões de agendamento:', error);
     return {
       sugestao: null,
+      alternativas: []
+    };
+  }
+}
 
 /**
  * Verifica se uma data e período específicos estão disponíveis para agendamento
