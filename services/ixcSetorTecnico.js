@@ -11,34 +11,53 @@ const path = require('path');
  * @returns {Array} Lista de IDs de técnicos vinculados ao setor
  */
 function getTecnicosPorSetor(idSetor) {
-  const vinculos = getVinculosSetoresTecnicos();
-  return vinculos[idSetor] || [];
+  try {
+    const vinculos = getVinculosSetoresTecnicos();
+    const tecnicos = vinculos[idSetor] || [];
+    console.log(`[INFO] Técnicos vinculados ao setor ${idSetor}:`, tecnicos);
+    return tecnicos;
+  } catch (error) {
+    console.error(`[ERRO] Falha ao obter técnicos para o setor ${idSetor}:`, error.message);
+    throw new Error(`Não foi possível obter os técnicos vinculados ao setor ${idSetor}: ${error.message}`);
+  }
 }
 
 /**
  * Carrega os vínculos de setores com técnicos
  * @returns {Object} Objeto com a estrutura: { idSetor: [idTecnico1, idTecnico2, ...] }
+ * @throws {Error} Se o arquivo não for encontrado
  */
 function getVinculosSetoresTecnicos() {
   try {
-    // Carregar do caminho do arquivo
-    const vinculosPath = path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json');
-    if (fs.existsSync(vinculosPath)) {
-      return JSON.parse(fs.readFileSync(vinculosPath, 'utf8'));
+    // Tentar caminhos possíveis para o arquivo
+    const caminhosPossiveis = [
+      path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json'),
+      path.join(process.cwd(), 'app/data/vinculos_setores_tecnicos.json'),
+      path.join(process.cwd(), 'backend/app/data/vinculos_setores_tecnicos.json')
+    ];
+    
+    let vinculosPath = null;
+    let arquivoEncontrado = false;
+    
+    // Verificar cada caminho possível
+    for (const caminho of caminhosPossiveis) {
+      if (fs.existsSync(caminho)) {
+        vinculosPath = caminho;
+        arquivoEncontrado = true;
+        console.log(`[INFO] Arquivo de vínculos encontrado em: ${vinculosPath}`);
+        break;
+      }
     }
     
-    // Se não encontrar o arquivo, retorna um objeto padrão
-    return {
-      "1": ["4", "5", "8", "9", "10", "11", "13"],
-      "2": ["1", "2", "3"],
-      "3": ["3", "4", "5", "7", "8", "10", "11", "12", "13"],
-      "4": ["4", "5", "6", "7", "8", "10", "12"],
-      "5": ["4", "9", "11", "12"],
-      "6": ["1", "6"]
-    };
+    if (!arquivoEncontrado) {
+      throw new Error(`Arquivo de vínculos não encontrado em nenhum dos caminhos: ${caminhosPossiveis.join(', ')}`);
+    }
+    
+    const conteudo = fs.readFileSync(vinculosPath, 'utf8');
+    return JSON.parse(conteudo);
   } catch (error) {
     console.error('Erro ao carregar vínculos de setores com técnicos:', error.message);
-    return {};
+    throw error; // Propagar o erro para que o chamador saiba que algo deu errado
   }
 }
 

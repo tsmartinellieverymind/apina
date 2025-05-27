@@ -15,18 +15,14 @@ dayjs.extend(isBetween);
 
 // Configuração do cliente API
 const api = axios.create({
-  baseURL: process.env.API_URL || 'https://demo.ixcsoft.com.br/webservice/v1',
+  baseURL: process.env.API_URL || 'https://api.ixcsoft.com.br/api',
   auth: {
     username: process.env.API_USER || 'user',
     password: process.env.API_PASS || 'pass'
   },
   httpsAgent: new https.Agent({
     rejectUnauthorized: false
-  }),
-  headers: {
-    'Content-Type': 'application/json',
-    ixcsoft: 'listar'
-  }
+  })
 });
 
 /**

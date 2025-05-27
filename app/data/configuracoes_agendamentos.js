@@ -25,7 +25,7 @@ const configuracoesAgendamento = [
     id_assunto: 1,
     prioridade: 2,
     dataMinimaAgendamentoDias:1,
-    dataMaximaAgendamentoDias:6,
+    dataMaximaAgendamentoDias:9,
     tipo: 'instalacao'
   },
   
@@ -34,7 +34,7 @@ const configuracoesAgendamento = [
     id_assunto: 2,
     prioridade: 1,
     dataMinimaAgendamentoDias: 1,
-    dataMaximaAgendamentoDias: 6,
+    dataMaximaAgendamentoDias: 9,
     tipo: 'manutencao'
   },
   

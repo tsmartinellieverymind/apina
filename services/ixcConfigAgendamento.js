@@ -10,35 +10,35 @@ const { isDiaUtil, getProximoDiaUtil } = require('./ixcUtilsData');
 // Carregar configurações de agendamento
 let configuracoes;
 try {
-  // Tentar carregar do caminho relativo ao diretório services
-  const configPath = path.join(__dirname, '../data/configuracoes_agendamento.json');
-  configuracoes = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-} catch (error) {
-  try {
-    // Tentar carregar do caminho absoluto da raiz do projeto
-    const configPath = path.join(process.cwd(), 'data/configuracoes_agendamento.json');
-    configuracoes = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (error) {
-    console.error('Erro ao carregar configurações de agendamento:', error.message);
-    // Usar configurações padrão caso o arquivo não seja encontrado
-    configuracoes = {
-      "assuntos": [
-        {
-          "id_assunto": "1",
-          "tipo": "I",
-          "descricao": "Instalação de internet fibra ótica",
-          "dataMinimaAgendamentoDias": 1,
-          "prazoMaximoAgendamentoDias": 10,
-          "prioridade": 0
-        }
-      ],
-      "default": {
-        "dataMinimaAgendamentoDias": 1,
-        "prazoMaximoAgendamentoDias": 10,
-        "prioridade": 0
-      }
-    };
+  // Tentar caminhos possíveis para o arquivo
+  const caminhosPossiveis = [
+    path.join(__dirname, '../app/data/configuracoes_agendamentos.js'), // Caminho correto com 's' e .js
+    path.join(process.cwd(), 'app/data/configuracoes_agendamentos.js'),
+    path.join(process.cwd(), 'backend/app/data/configuracoes_agendamentos.js')
+  ];
+  
+  let configPath = null;
+  let arquivoEncontrado = false;
+  
+  // Verificar cada caminho possível
+  for (const caminho of caminhosPossiveis) {
+    if (fs.existsSync(caminho)) {
+      configPath = caminho;
+      arquivoEncontrado = true;
+      console.log(`[INFO] Arquivo de configurações de agendamento encontrado em: ${configPath}`);
+      break;
+    }
   }
+  
+  if (!arquivoEncontrado) {
+    throw new Error(`Arquivo de configurações de agendamento não encontrado em nenhum dos caminhos: ${caminhosPossiveis.join(', ')}`);
+  }
+  
+  // Como é um arquivo .js, usamos require em vez de fs.readFile
+  configuracoes = require(configPath);
+} catch (error) {
+  console.error('Erro ao carregar configurações de agendamento:', error.message);
+  throw new Error(`Não foi possível carregar as configurações de agendamento: ${error.message}`);
 }
 
 /**
@@ -156,26 +156,39 @@ function getConfiguracoesAgendamentoOS(os) {
 /**
  * Retorna os vínculos entre setores e técnicos
  * @returns {Object} Objeto com a estrutura: { idSetor: [idTecnico1, idTecnico2, ...] }
+ * @throws {Error} Se o arquivo não for encontrado
  */
 function vinculosTecnicoSetor() {
   try {
-    // Tentar carregar do caminho relativo ao diretório services (novo formato)
-    const vinculosPath = path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json');
-    if (fs.existsSync(vinculosPath)) {
-      return JSON.parse(fs.readFileSync(vinculosPath, 'utf8'));
+    // Tentar caminhos possíveis para o arquivo
+    const caminhosPossiveis = [
+      path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json'),
+      path.join(process.cwd(), 'app/data/vinculos_setores_tecnicos.json'),
+      path.join(process.cwd(), 'backend/app/data/vinculos_setores_tecnicos.json')
+    ];
+    
+    let vinculosPath = null;
+    let arquivoEncontrado = false;
+    
+    // Verificar cada caminho possível
+    for (const caminho of caminhosPossiveis) {
+      if (fs.existsSync(caminho)) {
+        vinculosPath = caminho;
+        arquivoEncontrado = true;
+        console.log(`[INFO] Arquivo de vínculos encontrado em: ${vinculosPath}`);
+        break;
+      }
     }
     
-    // Se não encontrar o arquivo, retorna um objeto padrão com a nova estrutura
-    return {
-      "1": ["1", "2"], // Setor 1 tem técnicos 1 e 2
-      "2": ["1", "3"], // Setor 2 tem técnicos 1 e 3
-      "3": ["1", "3"], // Setor 3 tem técnicos 1 e 3
-      "4": ["1", "2"]  // Setor 4 tem técnicos 1 e 2
-    };
+    if (!arquivoEncontrado) {
+      throw new Error(`Arquivo de vínculos não encontrado em nenhum dos caminhos: ${caminhosPossiveis.join(', ')}`);
+    }
+    
+    const conteudo = fs.readFileSync(vinculosPath, 'utf8');
+    return JSON.parse(conteudo);
   } catch (error) {
     console.error('Erro ao carregar vínculos de setores com técnicos:', error.message);
-    // Retorna um objeto vazio em caso de erro
-    return {};
+    throw error; // Propagar o erro para que o chamador saiba que algo deu errado
   }
 }
 
