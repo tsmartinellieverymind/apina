@@ -536,7 +536,10 @@ user.numero = numero;
         /* --------------------------------------------------------------------
           4.5 RECUSAR/CANCELAR
         -------------------------------------------------------------------- */
-        case 'recusar_cancelar': {if (!user.clienteId) { break;}
+        case 'recusar_cancelar': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
           // Limpa variáveis relacionadas ao fluxo
           user.osEscolhida = null;
           user.dataInterpretada = null;
@@ -549,7 +552,10 @@ user.numero = numero;
         /* --------------------------------------------------------------------
           4.X MUDAR DE OS
         -------------------------------------------------------------------- */
-        case 'mudar_de_os': {if (!user.clienteId) { break;}
+        case 'mudar_de_os': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
           // Limpar variáveis relacionadas ao agendamento
           user.dataInterpretada = null;
           user.periodoAgendamento = null;
@@ -631,7 +637,10 @@ user.numero = numero;
         /* --------------------------------------------------------------------
           4.X LISTAR OPCOES
         -------------------------------------------------------------------- */
-        case 'listar_opcoes': {if (!user.clienteId) { break;}
+        case 'listar_opcoes': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
           user.osEscolhida = null;
           // Monta lista de OS disponíveis
           let osMsg = 'Nenhuma OS disponível.';
@@ -651,19 +660,33 @@ user.numero = numero;
         // /* --------------------------------------------------------------------
         //   4.1 INICIO
         // -------------------------------------------------------------------- */
-        case 'inicio': {if (!user.clienteId) { break;}
-            user._respostaCPF = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: user.cpf ? 'Não solicite o CPF.' : 'Peça o CPF para iniciar.'
-            });
+        case 'inicio': {
+          // This check ensures that if a user somehow re-enters 'inicio' after providing CPF, they aren't asked again.
+          // However, the primary goal of 'inicio' if no CPF is present, is to ask for it.
+          if (!user.clienteId) {
+             user._respostaCPF = await gerarMensagemDaIntent({
+               intent: 'extrair_cpf', // Force CPF collection
+               agentId: 'default-agent',
+               dados: contexto, // dados might be minimal here
+               promptExtra: 'Peça o CPF para iniciar.'
+             });
+             resposta = user._respostaCPF;
+             // Ensure etapaAtual is set to something that expects CPF input next, e.g., 'extrair_cpf'
+             user.etapaAtual = 'extrair_cpf'; 
+          } else {
+            // If client ID already exists, perhaps greet them or offer options.
+            resposta = await gerarMensagemDaIntent({ intent, agentId: 'default-agent', dados: contexto, promptExtra: 'Saudação ao usuário já identificado.' });
+          }
+          break;
         }
 
         /* --------------------------------------------------------------------
           4.2 ALEATORIO
         -------------------------------------------------------------------- */
-        case 'aleatorio': {if (!user.clienteId) { break;}
+        case 'aleatorio': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
           // Verificar se o usuário está respondendo a uma sugestão de OS
           if (user.etapaAtual === 'escolher_os' && user.osList && user.osList.length > 0) {
             // Tentar extrair o número da OS da mensagem do usuário
@@ -704,9 +727,8 @@ user.numero = numero;
           }
           
           // Se não for relacionado a uma sugestão de OS, continuar com o fluxo normal
-          if (!user.cpf) {
-            resposta = await gerarMensagemDaIntent({ intent, agentId: 'default-agent', dados: contexto, promptExtra: 'Peça o CPF.' });
-          } else if (['verificar_os', 'escolher_os', 'agendar_data', 'extrair_data', 'extrair_hora', 'confirmar_agendamento'].includes(user.etapaAnterior)) {
+          // The !user.cpf check is now redundant due to ensureClienteId
+          if (['verificar_os', 'escolher_os', 'agendar_data', 'extrair_data', 'extrair_hora', 'confirmar_agendamento'].includes(user.etapaAnterior)) {
             resposta = await gerarMensagemDaIntent({ intent, agentId: 'default-agent', dados: contexto, promptExtra: 'Solicite que o cliente conclua a etapa anterior.' });
           } else {
             resposta = await gerarMensagemDaIntent({ intent, agentId: 'default-agent', dados: contexto });
@@ -718,30 +740,11 @@ user.numero = numero;
           4.4 VERIFICAR OS
         -------------------------------------------------------------------- */
         case 'verificar_os': {
-          // Se não temos clienteId mas temos CPF, tentar buscar o cliente
-          if (!user.clienteId && user.cpf) {
-            try {
-              console.log('[DEBUG] Tentando buscar cliente por CPF:', user.cpf);
-              const cliente = await buscarClientePorCpf(user.cpf);
-              if (cliente?.cliente?.id) {
-                user.clienteId = cliente.cliente.id;
-                user.nomeCliente = cliente.cliente.razao;
-                console.log(`[DEBUG] Cliente encontrado: ID=${user.clienteId}, Nome=${user.nomeCliente}`);
-              } else {
-                resposta = `Não encontrei nenhum cliente com o CPF ${user.cpf} em nosso sistema. Poderia verificar se o número está correto e tentar novamente?`;
-                break;
-              }
-            } catch (errCliente) {
-              console.error('[ERRO] Erro ao buscar cliente por CPF:', errCliente);
-              resposta = 'Desculpe, ocorreu um erro ao buscar suas informações. Por favor, tente novamente mais tarde.';
-              break;
-            }
-          } else if (!user.clienteId) {
-            resposta = 'Para verificar suas ordens de serviço, preciso do seu CPF. Poderia me informar, por favor?';
-            user._respostaCPF = resposta;
-            user.etapaAtual = 'extrair_cpf';
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          // The previous logic for handling !user.clienteId (either by trying to find client by CPF or asking for CPF)
+          // is now handled by ensureClienteId or the 'extrair_cpf' case.
           
           // Buscar OS
           const lista = await buscarOSPorClienteId(user.clienteId);
@@ -777,7 +780,10 @@ user.numero = numero;
         /* --------------------------------------------------------------------
           4.5 ESCOLHER OS
         -------------------------------------------------------------------- */
-        case 'escolher_os': {if (!user.clienteId) { break;}
+        case 'escolher_os': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
           const resultado = await processarEscolhaOS({
             mensagem,
             contexto,
@@ -865,19 +871,20 @@ user.numero = numero;
           break;
         }
 
-        case 'datas_disponiveis': {if (!user.clienteId) { break;}
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          const verificacao = await verificarOSEscolhida(
-            user, 
-            'Para ver datas disponíveis, preciso saber qual ordem de serviço você deseja agendar. Pode me informar?',
-            mensagem,
-            contexto,
-            intent
-          );
-          if (!verificacao.osExiste) {
-            resposta = verificacao.resposta;
+        case 'datas_disponiveis': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            // If ensureOSEscolhida sets a response (e.g. "Não há ordens de serviço..." or asks to choose one), then break.
+            if (resposta) break; 
+            // Fallback if ensureOSEscolhida somehow fails to set user.osEscolhida and doesn't set a response.
+            if (!user.osEscolhida) {
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de ver as datas disponíveis.';
+                 break;
+            }
+          }
+          // The call to verificarOSEscolhida is now redundant.
 
           // Se a OS já está agendada, informa e oferece opções
           if (user.osEscolhida.status === 'AG') {
@@ -945,7 +952,20 @@ user.numero = numero;
         /* --------------------------------------------------------------------
           4.6 EXTRAI DATA
         -------------------------------------------------------------------- */
-        case 'extrair_data': {if (!user.clienteId) { break;}
+        case 'extrair_data': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
+          // OS is needed for `verificarDisponibilidade` later in this case.
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            if (resposta) break; 
+            if (!user.osEscolhida) { // Fallback, should be set by ensureOSEscolhida or 'resposta' set.
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de agendar.';
+                 break;
+            }
+          }
+          // At this point, user.osEscolhida should be set.
+
           const dataInterp = await interpretarDataNatural(mensagem, 'default-agent', contexto, 'Frase do usuário: "' + mensagem + '"');
           console.log('dataInterp: ' + dataInterp);
 
@@ -1004,24 +1024,11 @@ user.numero = numero;
             console.log(`Período detectado na mensagem: ${periodoDetectado === 'M' ? 'manhã' : 'tarde'}`);
           }
           
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          if (!user.osEscolhida) {
-            const verificacao = await verificarOSEscolhida(
-              user,
-              'Para agendar, preciso saber qual ordem de serviço você deseja.',
-              mensagem,
-              contexto,
-              intent
-            );
-            
-            if (verificacao.osExiste) {
-              user.osEscolhida = verificacao.osObj;
-              console.log(`OS ${user.osEscolhida.id} identificada no extrair_data`);
-            }
-          }
+          
+          // The block that previously called verificarOSEscolhida is removed as ensureOSEscolhida handles it.
           
           // Verificar se a data é válida usando a função verificarDisponibilidade
-          if (user.osEscolhida) {
+          if (user.osEscolhida) { // This check is still valid. ensureOSEscolhida should have populated user.osEscolhida.
             console.log(`Verificando disponibilidade com verificarDisponibilidade: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}`);
             const resultadoDisponibilidade = await verificarDisponibilidade(
               user.osEscolhida, 
@@ -1142,16 +1149,19 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
           4.7 EXTRAI HORA
         -------------------------------------------------------------------- */
-        case 'extrair_hora': {if (!user.clienteId) { break;}
-          if (!user.clienteId) {
-            resposta = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Peça o CPF primeiro.'
-            });
+        case 'extrair_hora': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          // OS is needed for `verificarDisponibilidade` later.
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            if (resposta) break;
+            if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de agendar.';
+                 break;
+            }
+          }
+          // At this point, user.osEscolhida should be set.
 
           const periodoInterp = await interpretaPeriodo(mensagem);
           if (!periodoInterp || !['M', 'T'].includes(periodoInterp)) {
@@ -1166,21 +1176,7 @@ Confirma o agendamento para essa data?`;
 
           user.periodoAgendamento = periodoInterp;
           
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          if (!user.osEscolhida) {
-            const verificacao = await verificarOSEscolhida(
-              user,
-              'Para agendar, preciso saber qual ordem de serviço você deseja.',
-              mensagem,
-              contexto,
-              intent
-            );
-            
-            if (verificacao.osExiste) {
-              user.osEscolhida = verificacao.osObj;
-              console.log(`OS ${user.osEscolhida.id} identificada no extrair_hora`);
-            }
-          }
+          // The block that previously called verificarOSEscolhida is removed.
           
           // Verificar se já temos data e OS para fazer o agendamento
           // PRIMEIRO, VERIFICAR SE TEMOS A DATA. SE NÃO, PEDIR.
@@ -1289,20 +1285,18 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
           4.7.1 ALTERAR PERIODO
         -------------------------------------------------------------------- */
-        case 'alterar_periodo': {if (!user.clienteId) { break;}
-
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          const verificacao = await verificarOSEscolhida(
-            user, 
-            'Ops! Precisamos primeiro selecionar uma OS para alterar o período. Pode me dizer qual OS você deseja?',
-            mensagem,
-            contexto,
-            intent
-          );
-          if (!verificacao.osExiste) {
-            resposta = verificacao.resposta;
+        case 'alterar_periodo': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+             if (resposta) break;
+             if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de alterar o período.';
+                 break;
+            }
+          }
+          // The call to verificarOSEscolhida is now redundant.
 
           // Extrair o período da mensagem (manhã ou tarde)
           const periodoInterp = await interpretaPeriodo(mensagem);
@@ -1352,7 +1346,18 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
           4.8 AGENDAR DATA
         -------------------------------------------------------------------- */
-        case 'agendar_data': {if (!user.clienteId) { break;}
+        case 'agendar_data': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+             if (resposta) break;
+             if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de agendar.';
+                 break;
+            }
+          }
+          // The call to verificarOSEscolhida is now redundant.
           
           // Verificar se é um pedido de reagendamento
           const msgLower = mensagem.toLowerCase();
@@ -1395,52 +1400,11 @@ Confirma o agendamento para essa data?`;
             }
           }
           
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          if (!user.osEscolhida) {
-            const verificacao = await verificarOSEscolhida(
-              user,
-              isReagendamento 
-                ? 'Para reagendar, preciso saber qual ordem de serviço você deseja modificar.'
-                : 'Para agendar, preciso saber qual ordem de serviço você deseja.',
-              mensagem,
-              contexto,
-              intent
-            );
-            
-            if (verificacao.osExiste) {
-              user.osEscolhida = verificacao.osObj;
-              console.log(`OS ${user.osEscolhida.id} identificada para ${isReagendamento ? 'reagendamento' : 'agendamento'}`);
-            } // This closes: if (verificacao.osExiste)
-
-            // This 'if' block is part of the missing code, checking if OS is *still* not chosen
-            if (!user.osEscolhida) { 
-              let msg = isReagendamento 
-                ? `${empatiaPrefixo}Para reagendar, preciso saber qual ordem de serviço você deseja modificar. Aqui estão suas OS:`
-                : 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
-              if (user.osList && user.osList.length > 0) {
-                const abertas = user.osList.filter(os => os.status === 'A');
-                const agendadas = user.osList.filter(os => os.status === 'AG');
-                if (abertas.length > 0) {
-                  msg += '\n\nOS abertas:';
-                  abertas.forEach(os => {
-                    msg += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'}`;
-                  });
-                }
-                if (agendadas.length > 0) {
-                  msg += '\n\nOS agendadas:';
-                  agendadas.forEach(os => {
-                    msg += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
-                  });
-                }
-                msg += '\nSe quiser, é só me dizer o número da OS ou a posição na lista! 😊';
-              }
-              resposta = msg;
-              break; 
-            }
-          } // This closes the 'if (!user.osEscolhida)' block from original line 1398 where OS is identified/asked for.
+          
+          // The block that previously called verificarOSEscolhida is removed.
 
           // NOVO FLUXO: Se já temos a OS escolhida, sugerir imediatamente as datas disponíveis
-          if (user.osEscolhida) { // This is the crucial conditional
+          if (user.osEscolhida) { 
             const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
             user.sugestoesAgendamento = sugestoes;
 
@@ -1511,15 +1475,37 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
         4.8 AGENDAR OUTRA DATA
       -------------------------------------------------------------------- */
-        case 'agendar_outra_data': {if (!user.clienteId) { break;}
-
-          if (!user.clienteId) {
-           break;
+        case 'agendar_outra_data': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
           }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            if (resposta) break;
+             if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de reagendar.';
+                 break;
+            }
+          }
+          // The call to verificarOSEscolhida is now redundant.
 
-          // Verificar se existe uma OS selecionada
-          const verificacao = await verificarOSEscolhida(user);
-          if (!verificacao.osExiste) {
+          if (!!user.dataInterpretada || !!user.periodoAgendamento) {
+            user.periodoAgendamento = null; // Limpa o período anterior
+            user.dataInterpretada = null; // Limpa a data anterior
+          }
+          
+          // This case implies the user wants to provide a new date/time.
+          resposta = await gerarMensagemDaIntent({
+            intent: 'extrair_data', // Transition to a state that expects date input
+            agentId: 'default-agent',
+            dados: contexto,
+            promptExtra: `Entendido. Para qual nova data e período (manhã ou tarde) você gostaria de reagendar a OS ${user.osEscolhida.id}?`
+          });
+          user.etapaAtual = 'extrair_data'; // Set the conversation to expect a date next.
+          break;
+        }
+
+        /* --------------------------------------------------------------------
+          4.9 CONSULTAR DISPONIBILIDADE DATA
             let msg = 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
             if (user.osList && user.osList.length > 0) {
               const abertas = user.osList.filter(os => os.status === 'A');
@@ -1541,55 +1527,19 @@ Confirma o agendamento para essa data?`;
             resposta = msg;
             break;
           }
-
-          if (!!user.dataInterpretada || !!user.periodoAgendamento) {
-            user.periodoAgendamento = null; // Limpa o período anterior
-            user.dataInterpretada = null; // Limpa a data anterior
-          }
-
-          resposta = await gerarMensagemDaIntent({
-            intent,
-            agentId: 'default-agent',
-            dados: contexto,
-            promptExtra: 'Faltam OS, data ou período para agendar.'
-          });
-
-          if (!user.osEscolhida || !user.dataInterpretada || !user.periodoAgendamento) {
-            resposta = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Faltam OS, data ou período para agendar.'
-            });
-            break;
-          }
-
-          user.aguardandoConfirmacaoDeAgendamento = true;
-          resposta = `Confirma agendar a OS ${user.osEscolhida.id} para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`;
-          break;
-        }
-
-        /* --------------------------------------------------------------------
-          4.9 CONSULTAR DISPONIBILIDADE DATA
         -------------------------------------------------------------------- */
-        case 'consultar_disponibilidade_data': {if (!user.clienteId) { break;}
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          const verificacao = await verificarOSEscolhida(
-            user,
-            null,
-            mensagem,
-            contexto,
-            intent
-          );
-          if (!verificacao.osExiste) {
-            resposta = await gerarMensagemDaIntent({
-              intent: 'aleatorio',
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'O usuário precisa escolher uma OS antes de consultar disponibilidade.'
-            });
+        case 'consultar_disponibilidade_data': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+             if (resposta) break;
+             if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de consultar a disponibilidade.';
+                 break;
+            }
+          }
+          // The call to verificarOSEscolhida is now redundant.
           
           const dataInterp = await interpretarDataNatural(mensagem, 'default-agent', contexto, 'Frase do usuário: "' + mensagem + '"');
           console.log('====== DATA SOLICITADA PARA VERIFICAÇÃO: ======');
@@ -1694,32 +1644,19 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
           4.9 CONFIRMAR AGENDAMENTO
         -------------------------------------------------------------------- */
-        case 'confirmar_agendamento': {if (!user.clienteId) { break;}
-          
-          console.log("================== user.osEscolhida ==================")  
-          console.log("==================" + user.clienteId + "=============================")
-          console.log("==================" + !user.clienteId + "=============================")
-          if (!user.clienteId) {
-            resposta = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Peça o CPF primeiro.'
-            });
+        case 'confirmar_agendamento': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          console.log("================== user.osEscolhida ==================")  
-          console.log("==================" + user.osEscolhida + "=============================")
-          console.log("==================" + !user.osEscolhida + "=============================")
-          // Verificar se existe uma OS selecionada ou tentar identificar da mensagem
-          const verificacao = await verificarOSEscolhida(
-            user,
-            null,
-            mensagem,
-            contexto,
-            intent
-          );
-          if (!verificacao.osExiste) {
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            if (resposta) break;
+            if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de confirmar o agendamento.';
+                 break;
+            }
+          }
+          // The call to verificarOSEscolhida is now redundant.
+          
             // Mostrar lista de OS disponíveis
             let msg = 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
             if (user.osList && user.osList.length > 0) {
@@ -1892,15 +1829,22 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
           4.10 MAIS DETALHES
         -------------------------------------------------------------------- */
-        case 'mais_detalhes': {if (!user.clienteId) { break;}
-          if (!user.osList || user.osList.length === 0) {
-            resposta = 'Ops! Parece que não temos nenhuma OS aberta. Tente novamente mais tarde.';
+        case 'mais_detalhes': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            if (resposta) break;
+             if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de ver mais detalhes.';
+                 break;
+            }
+          }
+          // The if (!user.osList || user.osList.length === 0) check is handled by ensureOSEscolhida.
+          // The call to verificarOSEscolhida is now redundant.
           
-          // Verificar se já existe uma OS selecionada
-          const verificacao = await verificarOSEscolhida(user, null);
-          if (verificacao.osExiste) {
+          // At this point, user.osEscolhida should be set if ensureOSEscolhida was successful.
+          if (user.osEscolhida) {
             // Se já tem OS escolhida, mostra os detalhes dela diretamente
             const os = user.osEscolhida;
             let dataFormatada = null;
@@ -1921,66 +1865,39 @@ Confirma o agendamento para essa data?`;
                 delete user[key];
               }
             });
-            break;
-          }
-
-          const idInterpretado = await interpretarNumeroOS({
-            mensagem,
-            agentId: 'default-agent',
-            dados: contexto,
-            osList: user.osList,
-            promptExtra: 'tente identificar o id da os.'
-          });
-          const osObj = user.osList.find(o => o.id === idInterpretado);
-
-          console.log('idInterpretado:', idInterpretado);
-
-          if (osObj) {
-            user.osEscolhida = osObj;
-            // Monta detalhes da OS escolhida (exemplo básico, pode customizar)
-            const os = user.osEscolhida;
-            // Formatar a data no padrão solicitado: dia DD do mês de (mês) no período da manhã/tarde
-            let dataFormatada = null;
-            if (os.data_agenda_final && os.data_agenda_final !== '0000-00-00 00:00:00') {
-              const dataObj = dayjs(os.data_agenda_final);
-              const dia = dataObj.format('DD');
-              const mes = dataObj.format('MMMM'); // Nome do mês por extenso
-              const periodo = os.melhor_horario_agenda === 'M' ? 'manhã' : 'tarde';
-              dataFormatada = `dia ${dia} do mês de ${mes} no período da ${periodo}`;
-            }
-            resposta = `Opa! Prontinho! Aqui estão os detalhes da sua OS ${os.id}:
-          • Assunto: ${os.titulo || os.mensagem || 'Sem descrição'}
-          • Status: ${os.status === 'AG' ? 'Agendada' : os.status === 'A' ? 'Aberta' : os.status}
-          ${dataFormatada ? `• Data agendada: ${dataFormatada}\n` : ''}${os.endereco ? `• Endereço: ${os.endereco}\n` : ''}Se precisar de mais alguma coisa, é só me chamar! 😊`;
+            // The logic for interpretarNumeroOS is largely superseded by ensureOSEscolhida trying to identify the OS from the message.
+            // If ensureOSEscolhida succeeded, user.osEscolhida is set. If it failed, 'resposta' would be set and broken.
+            // So, we directly use user.osEscolhida here.
+            Object.keys(user).forEach(key => {
+              if (!['cpf', 'clienteId', 'numero', 'nomeCliente'].includes(key)) {
+                delete user[key];
+              }
+            });
           } else {
-            resposta = 'Não consegui encontrar a OS que você está procurando. Aqui estão as opções disponíveis:';
-            const opcoes = user.osList.map(os => `OS ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'}`);
-            resposta += '\n' + opcoes.join('\n');
+             // This else implies user.osEscolhida was not set by ensureOSEscolhida.
+             // ensureOSEscolhida should have set a response message in this case.
+             if (!resposta) { // Should not happen if ensureOSEscolhida works as expected.
+                resposta = 'Não consegui identificar a OS para mostrar os detalhes. Por favor, informe o número da OS.';
+             }
           }
-
-          Object.keys(user).forEach(key => {
-            if (!['cpf', 'clienteId', 'numero', 'nomeCliente'].includes(key)) {
-              delete user[key];
-            }
-          });
           break;
         }
 
         /* --------------------------------------------------------------------
           4.5.1 CONFIRMAR ESCOLHA OS
         -------------------------------------------------------------------- */
-        case 'confirmar_escolha_os': {if (!user.clienteId) { break;}
-          // Verificar se existe uma OS selecionada
-          const verificacao = await verificarOSEscolhida(user, null, mensagem, contexto, intent);
-          if (!verificacao.osExiste) {
-            // Tenta pegar a última OS apresentada ao usuário
-            if (user.osList && user.osList.length === 1) {
-              user.osEscolhida = user.osList[0];
-            } else {
-              resposta = 'Qual ordem de serviço você deseja agendar? Informe o número ou a posição na lista.';
-              break;
+        case 'confirmar_escolha_os': {
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
+          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
+            if (resposta) break;
+            if (!user.osEscolhida) { // Fallback
+                 resposta = 'Por favor, me informe qual Ordem de Serviço você gostaria de confirmar.';
+                 break;
             }
           }
+          // The call to verificarOSEscolhida is now redundant.
 
           // Sugerir datas disponíveis para a OS escolhida, se possível
           const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
@@ -2003,6 +1920,14 @@ Confirma o agendamento para essa data?`;
 
         /* --------------------------------------------------------------------
           4.10 FINALIZADO
+            // Tenta pegar a última OS apresentada ao usuário
+            if (user.osList && user.osList.length === 1) {
+              user.osEscolhida = user.osList[0];
+            } else {
+              resposta = 'Qual ordem de serviço você deseja agendar? Informe o número ou a posição na lista.';
+              break;
+            }
+          }
         -------------------------------------------------------------------- */
         case 'finalizado':
         default: {
@@ -2033,16 +1958,41 @@ Confirma o agendamento para essa data?`;
         }
       } // fim switch
    
-      if (!user.cpf) {
-      resposta = await gerarMensagemDaIntent({
-        intent,
-        agentId: 'default-agent',
-        dados: contexto,
-        promptExtra: 'Peça o CPF primeiro.'
-      });
-    }
+      // The check `if (!user.cpf)` is now generally handled by `ensureClienteId` at the start of most relevant cases.
+      // However, if a case falls through or doesn't use ensureClienteId (like 'extrair_cpf', 'finalizado'),
+      // a general fallback might still be needed, or ensure all paths set 'resposta'.
+      // For intents that require CPF and didn't explicitly call ensureClienteId (e.g. if a new intent is added and forgotten),
+      // this could be a safety net. But ideally, each case handles its prerequisites.
+      // Given ensureClienteId is widely used, this specific check might become less critical.
+      // Let's comment it out for now and rely on specific case handling.
+      /*
+      if (!user.cpf && intent !== 'extrair_cpf' && intent !== 'inicio' && intent !== 'finalizado') { // Added conditions
+        resposta = await gerarMensagemDaIntent({
+          intent: 'extrair_cpf', // Redirect to CPF extraction
+          agentId: 'default-agent',
+          dados: contexto,
+          promptExtra: 'Para continuarmos, por favor, me informe o seu CPF.'
+        });
+      }
+      */
     /* -------------------- 5. Fallback ------------------------------ */
-    if (!resposta) resposta = 'Desculpe, não consegui entender. Pode tentar novamente?';
+    if (!resposta) {
+      // If, after all processing, 'resposta' is still empty, then provide a generic fallback.
+      // This ensures that the bot always says something.
+      if (user.clienteId && (!user.osList || user.osList.length === 0)) {
+        // If user is identified but has no OS, this could be a common scenario for a generic reply.
+        resposta = "Não encontrei Ordens de Serviço para você no momento. Gostaria de tentar outra opção?";
+      } else if (user.clienteId && user.osList && user.osList.length > 0 && !user.osEscolhida) {
+        // If user is identified, has OS list, but none is chosen, prompt to choose.
+        resposta = "Tenho algumas Ordens de Serviço aqui. Para qual delas você gostaria de atendimento? Por favor, me informe o número da OS.";
+      } else if (user.clienteId) {
+        // Generic message if user is identified but context is unclear.
+        resposta = "Como posso te ajudar hoje?";
+      } else {
+        // Default fallback if no context at all.
+        resposta = 'Desculpe, não consegui entender. Pode tentar novamente? Se precisar de ajuda, digite "opções".';
+      }
+    }
 
     /* ----------- LOG COMPLETO DO ESTADO ANTES DE RESPONDER --------- */
     logEstado({ numero, user, intent, resposta });
