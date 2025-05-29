@@ -1829,6 +1829,7 @@ Confirma o agendamento para essa data?`;
         /* --------------------------------------------------------------------
           4.10 MAIS DETALHES
         -------------------------------------------------------------------- */
+        switch(intent) {
         case 'mais_detalhes': {
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
