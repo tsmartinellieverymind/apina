@@ -147,6 +147,102 @@ async function verificaClienteIdOuPedeCPF(user, contexto, intent) {
   return true;
 }
 
+/**
+ * Verifica se o usuário tem um clienteId e, se não tiver, define uma resposta apropriada.
+ * Retorna true se o clienteId estiver presente, false caso contrário.
+ * @param {Object} user - Objeto do usuário
+ * @param {Object} respostaObj - Objeto com getter/setter para a resposta
+ * @returns {boolean} - true se o clienteId estiver presente, false caso contrário
+ */
+async function ensureClienteId(user, respostaObj) {
+  if (!user.clienteId) {
+    // Se não temos o clienteId, precisamos pedir o CPF
+    respostaObj.resposta = 'Por favor, me informe seu CPF para que eu possa identificar suas ordens de serviço.';
+    user.etapaAtual = 'pedir_cpf';
+    user.tipoUltimaPergunta = 'CPF';
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Verifica se uma OS foi escolhida e, se não, tenta extrair uma da mensagem ou definir uma resposta apropriada.
+ * @param {Object} user - Objeto do usuário
+ * @param {Object} respostaObj - Objeto com getter/setter para a resposta
+ * @param {string} mensagem - Mensagem do usuário
+ * @param {string} contexto - Contexto da conversa
+ * @param {string} intent - Intent atual
+ * @param {Array} osList - Lista de OS disponíveis (opcional)
+ * @returns {boolean} - true se uma OS foi escolhida ou definida, false caso contrário
+ */
+async function ensureOSEscolhida(user, respostaObj, mensagem, contexto, intent, osList) {
+  // Se já temos uma OS escolhida, não precisamos fazer nada
+  if (user.osEscolhida) {
+    return true;
+  }
+  
+  // Verificar se temos uma lista de OS
+  if (!user.osList || user.osList.length === 0) {
+    // Se não temos uma lista de OS, precisamos buscá-la primeiro
+    if (!user.clienteId) {
+      // Se não temos o clienteId, não podemos buscar as OS
+      respostaObj.resposta = 'Precisamos do seu CPF para identificar suas ordens de serviço.';
+      return false;
+    }
+    
+    try {
+      const lista = await buscarOSPorClienteId(user.clienteId);
+      if (!lista || lista.length === 0) {
+        respostaObj.resposta = 'Não encontrei nenhuma ordem de serviço para o seu CPF. Por favor, verifique se o CPF está correto ou entre em contato com o suporte.';
+        return false;
+      }
+      user.osList = lista;
+    } catch (error) {
+      console.error('Erro ao buscar OS por clienteId:', error);
+      respostaObj.resposta = 'Ocorreu um erro ao buscar suas ordens de serviço. Por favor, tente novamente mais tarde.';
+      return false;
+    }
+  }
+  
+  // Se só temos uma OS na lista, podemos selecioná-la automaticamente
+  if (user.osList.length === 1) {
+    user.osEscolhida = user.osList[0];
+    console.log(`Auto-selecionando a única OS disponível: ${user.osEscolhida.id}`);
+    return true;
+  }
+  
+  // Tentar extrair o número da OS da mensagem do usuário
+  const resultado = await processarEscolhaOS({
+    mensagem,
+    contexto,
+    intent,
+    osList: user.osList
+  });
+  
+  if (resultado && resultado.osObj) {
+    user.osEscolhida = resultado.osObj;
+    return true;
+  }
+  
+  // Se não conseguimos extrair uma OS, precisamos pedir ao usuário para escolher uma
+  let osMsg = '';
+  if (user.osList.length > 0) {
+    osMsg = 'Encontrei as seguintes ordens de serviço para você:\n';
+    user.osList.forEach((os, index) => {
+      const data = os.data_abertura ? dayjs(os.data_abertura).format('DD/MM/YYYY') : 'Data não disponível';
+      const assunto = os.assunto || 'Assunto não disponível';
+      osMsg += `${index + 1}. OS #${os.id} - ${assunto} (aberta em ${data})\n`;
+    });
+    osMsg += '\nPor favor, informe o número da OS ou a posição na lista (1, 2, etc) para a qual deseja verificar as datas disponíveis.';
+  } else {
+    osMsg = 'Não encontrei nenhuma ordem de serviço para você. Por favor, entre em contato com o suporte.';
+  }
+  
+  respostaObj.resposta = osMsg;
+  user.etapaAtual = 'escolher_os';
+  return false;
+}
+
 /* ---------------------------------------------------------
    Sessões em memória (por número)
 --------------------------------------------------------- */
@@ -668,11 +764,11 @@ user.numero = numero;
                intent: 'extrair_cpf', // Force CPF collection
                agentId: 'default-agent',
                dados: contexto, // dados might be minimal here
-               promptExtra: 'Peça o CPF para iniciar.'
+               promptExtra: 'Se apresente caso ainda não tenha feito, e peça o CPF para iniciar.'
              });
              resposta = user._respostaCPF;
              // Ensure etapaAtual is set to something that expects CPF input next, e.g., 'extrair_cpf'
-             user.etapaAtual = 'extrair_cpf'; 
+            // user 'extrair_cpf'; 
           } else {
             // If client ID already exists, perhaps greet them or offer options.
             resposta = await gerarMensagemDaIntent({ intent, agentId: 'default-agent', dados: contexto, promptExtra: 'Saudação ao usuário já identificado.' });
@@ -1184,7 +1280,6 @@ Confirma o agendamento para essa data?`;
             const periodoExtensoUser = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
             resposta = `Entendi que você prefere o período da ${periodoExtensoUser}. Para qual data seria o agendamento?`;
             // Manter a etapa para que o próximo input seja processado como extrair_data ou agendar_data
-            user.etapaAtual = 'extrair_data'; // Ou 'agendar_data' dependendo do fluxo desejado
             break;
           }
 
@@ -1824,12 +1919,10 @@ Confirma o agendamento para essa data?`;
           }
 
           break;
-        }
 
         /* --------------------------------------------------------------------
           4.10 MAIS DETALHES
         -------------------------------------------------------------------- */
-        switch(intent) {
         case 'mais_detalhes': {
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
