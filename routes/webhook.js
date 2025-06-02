@@ -572,8 +572,18 @@ user.numero = numero;
             } else {
               console.error('[ERRO] buscarClientePorCpf:', errCliente);
             }
-            // Opcional: repassar erro para o usuário
-            resposta = 'Erro ao buscar cliente: ' + (errCliente.response ? errCliente.response.status + ' - ' + JSON.stringify(errCliente.response.data) : errCliente.message);
+            
+            // Fornecer uma mensagem amigável ao usuário com base no tipo de erro
+            if (errCliente.response && errCliente.response.status === 401) {
+              resposta = 'Desculpe, estamos enfrentando problemas de autenticação com nosso sistema. Por favor, tente novamente mais tarde ou entre em contato com nosso suporte técnico.';
+            } else if (errCliente.response && errCliente.response.status === 404) {
+              resposta = 'Não encontramos nenhum cliente cadastrado com este CPF. Por favor, verifique se o número está correto ou entre em contato com nosso suporte para mais informações.';
+            } else {
+              resposta = 'Desculpe, ocorreu um problema ao buscar seus dados. Por favor, tente novamente mais tarde ou entre em contato com nosso suporte técnico.';
+            }
+            
+            // Registrar o erro técnico apenas no log, não para o usuário
+            console.error('Erro técnico completo:', (errCliente.response ? errCliente.response.status + ' - ' + JSON.stringify(errCliente.response.data) : errCliente.message));
             user.clienteId = null;
             user.nomeCliente = null;
             // Não precisamos sair do fluxo, apenas definimos a resposta e continuamos normalmente

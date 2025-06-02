@@ -15,6 +15,7 @@ dayjs.extend(isBetween);
 
 // Configuração do cliente API
 const api = axios.create({
+
   baseURL: process.env.API_URL || 'https://demo.ixcsoft.com.br/webservice/v1',
   auth: {
     username: process.env.API_USER || 'user',
@@ -28,6 +29,14 @@ const api = axios.create({
     ixcsoft: 'listar'
   }
 });
+
+console.log(api.defaults.baseURL);
+// Log para debug da configuração
+console.log(`[IXCService] Inicializando com URL: ${api.defaults.baseURL || 'Não configurada'}`);
+console.log(`[IXCService] Token configurado: ${process.env.API_TOKEN ? 'Sim' : 'Não'}`);
+console.log(`[IXCService] Usuário API configurado: ${process.env.API_USER ? 'Sim' : 'Não'}`);
+console.log(`[IXCService] Senha API configurada: ${process.env.API_PASS ? 'Sim' : 'Não'}`);
+
 
 /**
  * Verifica a disponibilidade de uma data e período específicos para agendamento
@@ -591,11 +600,18 @@ async function buscarOSPorClienteId(clienteId) {
  */
 async function atualizarOS(osId, payload) {
   try {
+    // Verificar se o token está disponível
+    if (!process.env.API_TOKEN) {
+      console.error('❌ Erro: Token da API IXC não configurado para atualizar OS');
+      throw new Error('Token da API não configurado');
+    }
+    
     const body = new URLSearchParams();
-    body.append('token', process.env.API_TOKEN || 'token');
+    body.append('token', process.env.API_TOKEN);
     body.append('id', osId);
     body.append('data', JSON.stringify(payload));
 
+    console.log(`Atualizando OS ${osId} usando token: ${process.env.API_TOKEN ? 'Configurado' : 'Não configurado'}`);
     const response = await api.post('/su_oss_chamado/alterar', body, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
@@ -607,11 +623,303 @@ async function atualizarOS(osId, payload) {
   }
 }
 
+/**
+ * Busca OSs abertas sem setor atribuído
+ * @returns {Promise<Array>} Lista de OSs abertas sem setor
+ */
+async function buscarOSAbertas() {
+  try {
+    console.log('Buscando OSs abertas sem setor atribuído...');
+    
+    // Criar corpo da requisição exatamente como buscarClientePorCpf
+    const body = new URLSearchParams();
+    body.append('qtype', 'su_oss_chamado.status');
+    body.append('query', 'A'); // Status A = Aberto
+    body.append('oper', '=');
+    body.append('page', '1');
+    body.append('rp', '10000');
+    body.append('sortname', 'su_oss_chamado.id');
+    body.append('sortorder', 'desc');
+    
+    // Usar o cliente API padrão com autenticação básica
+    console.log('[buscarOSAbertas] Parâmetros da requisição:', body.toString());
+    const response = await api.post('/su_oss_chamado', body, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', ixcsoft: 'listar' }
+    });
+    
+    console.log(api.getUri());
+    console.log('[buscarOSAbertas] Resposta bruta da API:', JSON.stringify(response.data, null, 2));
+    
+    if (response.data && response.data.registros) {
+      // Filtrar apenas OSs sem setor atribuído
+      const osSemSetor = Object.values(response.data.registros).filter(os => 
+        !os.id_setor || os.id_setor === '0' || os.id_setor === '' || os.id_setor === null
+      );
+      
+      console.log(`Encontradas ${osSemSetor.length} OSs sem setor atribuído.`);
+      return osSemSetor;
+    }
+    
+    console.log('Nenhuma OS encontrada sem setor atribuído. Resposta completa:', JSON.stringify(response.data, null, 2));
+    return [];
+  } catch (error) {
+    console.error('Erro ao buscar OSs abertas:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Busca detalhes da OS incluindo bairro e tipo de serviço
+ * @param {Object} os - Objeto da OS
+ * @returns {Promise<Object>} Detalhes da OS
+ */
+async function buscarDetalhesOS(os) {
+  try {
+    // Buscar detalhes da OS
+    const params = {
+      token: process.env.API_TOKEN,
+      qtype: 'su_oss.id',
+      query: os.id,
+      oper: '=',
+      page: '1',
+      rp: '1',
+      sortname: 'su_oss.id',
+      sortorder: 'desc'
+    };
+
+    const response = await api.post('su_oss', params);
+    
+    if (!response.data || !response.data.registros || response.data.registros.length === 0) {
+      console.error(`OS não encontrada com o ID ${os.id}`);
+      return null;
+    }
+    
+    const osDetalhes = response.data.registros[0];
+    
+    // Buscar detalhes do cliente para obter o bairro
+    const clienteParams = {
+      token: process.env.API_TOKEN,
+      qtype: 'cliente.id',
+      query: osDetalhes.id_cliente,
+      oper: '=',
+      page: '1',
+      rp: '1'
+    };
+    
+    const clienteResponse = await api.post('cliente', clienteParams);
+    
+    if (!clienteResponse.data || !clienteResponse.data.registros || clienteResponse.data.registros.length === 0) {
+      console.error(`Cliente não encontrado para a OS ${os.id}`);
+      return null;
+    }
+    
+    const cliente = clienteResponse.data.registros[0];
+    
+    // Buscar detalhes do assunto para determinar o tipo de serviço
+    const assuntoParams = {
+      token: process.env.API_TOKEN,
+      qtype: 'su_oss_assunto.id',
+      query: os.id_assunto,
+      oper: '=',
+      page: '1',
+      rp: '1'
+    };
+    
+    const assuntoResponse = await api.post('su_oss_assunto', assuntoParams);
+    
+    let tipoServico = 'instalação'; // Valor padrão
+    
+    if (assuntoResponse.data && assuntoResponse.data.registros && assuntoResponse.data.registros.length > 0) {
+      const assunto = assuntoResponse.data.registros[0];
+      
+      // Determinar o tipo de serviço com base no assunto
+      if (assunto.descricao.toLowerCase().includes('manuten')) {
+        tipoServico = 'manutenção';
+      }
+    }
+    
+    return {
+      osId: os.id,
+      bairro: cliente.bairro,
+      tipoServico: tipoServico
+    };
+  } catch (error) {
+    console.error(`Erro ao buscar detalhes da OS ${os.id}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Atualiza a OS com o setor determinado
+ * @param {string} osId - ID da OS
+ * @param {string} setorId - ID do setor
+ * @returns {Promise<boolean>} Sucesso da atualização
+ */
+async function atualizarOSComSetor(osId, setorId) {
+  try {
+    console.log(`Atualizando OS ${osId} com o setor ${setorId}...`);
+    
+    // Usando o mesmo padrão da função atualizarOS
+    const payload = {
+      setor: setorId
+    };
+    
+    // Reutilizando a função atualizarOS para manter consistência
+    const resultado = await atualizarOS(osId, payload);
+    
+    if (resultado && resultado.status === 'success') {
+      console.log(`✅ OS ${osId} atualizada com sucesso para o setor ${setorId}`);
+      return true;
+    }
+    
+    console.error(`❌ Erro ao atualizar OS ${osId}:`, resultado);
+    return false;
+  } catch (error) {
+    console.error(`❌ Erro ao atualizar OS ${osId} com o setor ${setorId}:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Busca o setor correspondente ao bairro no MongoDB
+ * @param {string} bairro - Nome do bairro
+ * @param {string} tipoServico - Tipo de serviço (instalação ou manutenção)
+ * @returns {Promise<string|null>} ID do setor ou null se não encontrado
+ */
+async function buscarSetorPorBairro(bairro, tipoServico) {
+  try {
+    const mongoose = require('mongoose');
+    
+    // Conectar ao MongoDB se ainda não estiver conectado
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(process.env.MONGO_URI, {
+        tls: true,
+        tlsAllowInvalidCertificates: true
+      });
+    }
+    
+    // Buscar na coleção de configurações de setores
+    const setoresCollection = mongoose.connection.db.collection('configuracoes.setores');
+    
+    // Primeiro tenta encontrar uma correspondência exata
+    let setor = await setoresCollection.findOne({ 
+      bairro: { $regex: new RegExp(`^${bairro}$`, 'i') },
+      tipoServico: tipoServico
+    });
+    
+    // Se não encontrar, tenta buscar apenas pelo bairro
+    if (!setor) {
+      setor = await setoresCollection.findOne({ 
+        bairro: { $regex: new RegExp(`^${bairro}$`, 'i') }
+      });
+    }
+    
+    if (setor) {
+      console.log(`Setor encontrado para o bairro ${bairro}: ${setor.id_setor}`);
+      return setor.id_setor;
+    }
+    
+    // Se ainda não encontrou, usa o OpenAI para tentar encontrar o melhor match
+    return await findSetorByBairro(bairro, tipoServico);
+  } catch (error) {
+    console.error(`Erro ao buscar setor para o bairro ${bairro}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Usa o OpenAI para encontrar o setor mais próximo com base no bairro
+ * @param {string} bairro - Nome do bairro
+ * @param {string} tipoServico - Tipo de serviço (instalação ou manutenção)
+ * @returns {Promise<string|null>} ID do setor ou null se não encontrado
+ */
+async function findSetorByBairro(bairro, tipoServico) {
+  try {
+    const mongoose = require('mongoose');
+    const { OpenAI } = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    
+    // Conectar ao MongoDB se ainda não estiver conectado
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(process.env.MONGO_URI, {
+        tls: true,
+        tlsAllowInvalidCertificates: true
+      });
+    }
+    
+    // Buscar todos os setores disponíveis
+    const setoresCollection = mongoose.connection.db.collection('configuracoes.setores');
+    const todosSetores = await setoresCollection.find({}).toArray();
+    
+    if (todosSetores.length === 0) {
+      console.log('Nenhum setor encontrado na base de dados.');
+      return null;
+    }
+    
+    // Criar uma lista de bairros conhecidos
+    const bairrosConhecidos = todosSetores.map(s => s.bairro);
+    
+    // Usar OpenAI para encontrar o bairro mais próximo
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: "Você é um assistente especializado em encontrar correspondências entre bairros. Sua tarefa é identificar qual bairro da lista é mais similar ao bairro fornecido."
+        },
+        {
+          role: "user",
+          content: `Encontre o bairro mais similar a "${bairro}" na seguinte lista: ${JSON.stringify(bairrosConhecidos)}. Responda apenas com o nome do bairro mais similar, sem explicações adicionais.`
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 50
+    });
+    
+    const bairroSimilar = completion.choices[0].message.content.trim();
+    
+    // Buscar o setor correspondente ao bairro similar
+    const setorEncontrado = todosSetores.find(s => 
+      s.bairro.toLowerCase() === bairroSimilar.toLowerCase() && 
+      (!s.tipoServico || s.tipoServico === tipoServico)
+    );
+    
+    if (setorEncontrado) {
+      console.log(`Setor encontrado via IA para o bairro ${bairro} (similar a ${bairroSimilar}): ${setorEncontrado.id_setor}`);
+      
+      // Salvar esta correspondência para uso futuro
+      await setoresCollection.insertOne({
+        bairro: bairro,
+        tipoServico: tipoServico,
+        id_setor: setorEncontrado.id_setor,
+        bairroOriginal: bairroSimilar,
+        criadoEm: new Date(),
+        criadoPor: 'IA'
+      });
+      
+      return setorEncontrado.id_setor;
+    }
+    
+    console.log(`Nenhum setor encontrado para o bairro ${bairro}, mesmo após busca por similaridade.`);
+    return null;
+  } catch (error) {
+    console.error(`Erro ao buscar setor via IA para o bairro ${bairro}:`, error.message);
+    return null;
+  }
+}
+
 module.exports = {
   verificarDisponibilidade,
   verificarDisponibilidadeData,
   gerarSugestoesDeAgendamento,
   buscarClientePorCpf,
+  formatarCpf,
   buscarOSPorClienteId,
-  atualizarOS
+  atualizarOS,
+  // Funções para atribuição de setores
+  buscarOSAbertas,
+  buscarDetalhesOS,
+  atualizarOSComSetor,
+  buscarSetorPorBairro,
+  findSetorByBairro
 };

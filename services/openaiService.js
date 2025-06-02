@@ -17,7 +17,6 @@ function logPrompt(title, body = '') {
   );
 }
 
-
 function gerarTodasAsIntentsPrompt() {
   return INTENTS.map(i => {
     const p = i.gerarPrompt();
@@ -26,7 +25,6 @@ function gerarTodasAsIntentsPrompt() {
       descrição: ${p.descricao}`;
   }).join('\n\n');
 }
-
 
 async function gerarMensagemDaIntent({
   intent,
@@ -147,7 +145,6 @@ Retorne APENAS o JSON:
     return { intent: 'aleatorio' };
   }
 }
-
 
 /**
  * Gera uma resposta com base nos filhos da intent atual.
@@ -403,6 +400,7 @@ Frase do usuário: "${mensagem}"
     return null;
   }
 }
+
 async function interpretarEscolhaOS({ mensagem, osList = [], agentId = '', dados = {}, promptExtra = '' }) {
   const lista = osList.map((o, i) => `${i + 1}) ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
 
@@ -447,7 +445,6 @@ Responda APENAS o JSON pedido.
   const json = JSON.parse(resposta.choices[0].message.content);
   return json.posicao ?? null;
 }
-
 
 module.exports = {
 responderComBaseNaIntent,

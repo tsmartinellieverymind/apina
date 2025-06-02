@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const conectarMongo = require('./config/mongo'); // conexão com MongoDB
 const webhook = require('./routes/webhook');     // rota do bot
+const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS'); // job para atribuir setores às OS
 
 const app = express();
 
@@ -117,14 +118,54 @@ const PORT = process.env.PORT || 5000;
 
 (async () => {
   try {
-    //await conectarMongo();
+    // Tentar conectar ao MongoDB, mas não falhar se a conexão não for bem-sucedida
+    const mongoConectado = await conectarMongo();
+    
+    // Verificar se as variáveis de ambiente para a API IXC estão configuradas
+    const apiUrlConfigurada = process.env.API_URL;
+    const apiTokenConfigurado = process.env.API_TOKEN;
+    
+    if (!apiUrlConfigurada) {
+      console.log('⚠️ Aviso: URL da API IXC não configurada. Usando URL de demonstração como fallback.');
+      console.log('⚠️ Recomenda-se configurar a variável API_URL no arquivo .env para ambiente de produção.');
+    }
+    
+    if (!apiTokenConfigurado) {
+      console.log('⚠️ Aviso: Token da API IXC não configurado. Configure a variável API_TOKEN no arquivo .env');
+    }
+    
+    // Iniciar o job para atribuir setores às OS apenas se o MongoDB estiver conectado
+    if (mongoConectado) {
+      try {
+        const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS');
+        
+        // Verificar se o token da API está configurado (URL pode usar fallback)
+        if (apiTokenConfigurado) {
+          const jobIniciado = iniciarJobAtribuirSetorOS();
+          if (jobIniciado) {
+            console.log('✅ Job de atribuição de setores iniciado com sucesso!');
+          } else {
+            console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
+            console.log('Verifique se a variável API_TOKEN está configurada corretamente no arquivo .env.');
+          }
+        } else {
+          console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
+          console.log('Verifique se a variável API_TOKEN está configurada no arquivo .env.');
+        }
+      } catch (jobError) {
+        console.error('❌ Erro ao iniciar job de atribuição de setores:', jobError);
+        console.log('O servidor continuará funcionando, mas o job de atribuição de setores não estará ativo.');
+      }
+    } else {
+      console.log('⚠️ Servidor iniciando sem conexão com MongoDB. Algumas funcionalidades estarão indisponíveis.');
+    }
+    
+    // Iniciar o servidor independentemente da conexão com o MongoDB
     app.listen(PORT, () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
     });
   } catch (error) {
-    console.error('❌ Erro ao iniciar servidor:', error);
+    console.error('❌ Erro fatal ao iniciar o servidor:', error);
     process.exit(1);
   }
-})
-
-();
+})();
