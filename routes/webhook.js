@@ -45,19 +45,67 @@ async function interpretaDataePeriodo({ mensagem, agentId = 'default-agent', dad
     console.log(dataInterp);
     console.log('===============================')
 
-    // Se não encontrou data válida, retorna null
-    if (!dataInterp || !dayjs(dataInterp).isValid()) {
-      return null;
+    // Primeiro, tenta extrair a data e o período usando o serviço da OpenAI.
+    // Ajuste o promptExtra para que a OpenAI tente identificar ambos.
+    const openAIResult = await interpretarDataNatural(
+      mensagem,
+      agentId,
+      dados,
+      promptExtra + ' Identifique a data e o período (manhã ou tarde) na frase do usuário: "' + mensagem + '". Responda APENAS com a data no formato YYYY-MM-DD e o período como "M" para manhã ou "T" para tarde, separados por vírgula. Exemplo: "2024-07-25,M". Se não identificar um período específico, use "T" como padrão para o período APENAS SE UMA DATA FOR IDENTIFICADA.'
+    );
+
+    console.log('====== RESULTADO interpretarDataNatural (data e período): ======');
+    console.log(openAIResult);
+    console.log('============================================================');
+
+    let dataFinal = null;
+    let periodoFinal = null;
+
+    if (openAIResult && typeof openAIResult === 'string') {
+      const parts = openAIResult.split(',');
+      if (parts.length > 0 && dayjs(parts[0].trim()).isValid()) {
+        dataFinal = parts[0].trim();
+      }
+      if (parts.length > 1 && ['M', 'T'].includes(parts[1].trim().toUpperCase())) {
+        periodoFinal = parts[1].trim().toUpperCase();
+      }
+    } else if (openAIResult && openAIResult.data_interpretada && dayjs(openAIResult.data_interpretada).isValid()) {
+      // Fallback para caso a OpenAI retorne um objeto (estrutura antiga)
+      dataFinal = openAIResult.data_interpretada;
+      periodoFinal = openAIResult.periodo_interpretado; // Pode ser null ou indefinido
     }
 
-   // Retorna objeto com data e período
+
+    // Se a OpenAI não retornou um período válido (M ou T), mas retornou uma data,
+    // tentar usar a função local `interpretaPeriodo` como fallback.
+    if (dataFinal && (!periodoFinal || !['M', 'T'].includes(periodoFinal))) {
+      console.log('OpenAI não retornou período válido, tentando interpretaPeriodo localmente.');
+      const periodoLocal = await interpretaPeriodo(mensagem);
+      if (periodoLocal) {
+        console.log('Período local encontrado:', periodoLocal);
+        periodoFinal = periodoLocal;
+      } else if (!periodoFinal && dataFinal) { // Se NENHUM período foi encontrado (nem OpenAI, nem local) E temos data
+        console.log('Nenhum período específico encontrado, usando "T" (tarde) como padrão pois uma data foi identificada.');
+        periodoFinal = 'T'; // Default para tarde se NENHUM período foi encontrado e temos data
+      }
+    }
+
+    // Se ainda não temos data, mas temos período (cenário menos comum),
+    // ou se não temos data de forma alguma, retorna null para indicar falha na extração completa.
+    if (!dataFinal) {
+      console.log('Nenhuma data válida foi interpretada.');
+      return { data_interpretada: null, periodo_interpretado: periodoFinal }; // Retorna período se houver, mesmo sem data
+    }
+
+    // Retorna objeto com data e período
     return {
-      data_interpretada: dataInterp.data_interpretada,
-      periodo_interpretado: dataInterp.periodo_interpretado || 'T' // Default para tarde se não encontrou período
+      data_interpretada: dataFinal,
+      periodo_interpretado: periodoFinal
     };
+
   } catch (error) {
     console.error('Erro ao interpretar data e período:', error);
-    return null;
+    return { data_interpretada: null, periodo_interpretado: null };
   }
 }
 
@@ -77,7 +125,7 @@ async function interpretaPeriodo(mensagem) {
     const keywordsManha = [
       'manha', 'manhã', 'matutino', 'cedo', 'antes do almoco', 'antes do almoço',
       'antes do meio dia', 'am', 'a.m', 'a.m.', 'de manha', 'pela manha', 'pela manhã',
-      '8h', '9h', '10h', '11h', '8:00', '9:00', '10:00', '11:00',
+      '08h', '09h', '10h', '11h', '8h', '9h', '10h', '11h', '8:00', '9:00', '10:00', '11:00',
       '8 horas', '9 horas', '10 horas', '11 horas',
       'oito horas', 'nove horas', 'dez horas', 'onze horas'
     ];
@@ -87,16 +135,16 @@ async function interpretaPeriodo(mensagem) {
       'tarde', 'vespertino', 'depois do almoco', 'depois do almoço', 
       'depois do meio dia', 'pm', 'p.m', 'p.m.', 'de tarde', 'pela tarde',
       '13h', '14h', '15h', '16h', '17h', '18h', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00',
-      '1h', '2h', '3h', '4h', '5h', '6h', '1:00', '2:00', '3:00', '4:00', '5:00', '6:00',
+      '1h', '2h', '3h', '4h', '5h', '6h', '1:00', '2:00', '3:00', '4:00', '5:00', '6:00', // Adicionado 1h-6h para tarde
       '13 horas', '14 horas', '15 horas', '16 horas', '17 horas', '18 horas',
-      '1 hora', '2 horas', '3 horas', '4 horas', '5 horas', '6 horas',
-      'uma hora', 'duas horas', 'tres horas', 'quatro horas', 'cinco horas', 'seis horas'
+      '1 hora', '2 horas', '3 horas', '4 horas', '5 horas', '6 horas', // Adicionado "X hora(s)" para tarde
+      'uma hora', 'duas horas', 'tres horas', 'quatro horas', 'cinco horas', 'seis horas' // Adicionado por extenso para tarde
     ];
     
     // Verificar se a mensagem contém palavras-chave de manhã
     for (const keyword of keywordsManha) {
       if (msgLower.includes(keyword)) {
-        console.log(`Período da manhã identificado pela palavra-chave: ${keyword}`);
+        console.log(`Período da manhã identificado pela palavra-chave local: ${keyword}`);
         return 'M';
       }
     }
@@ -104,15 +152,16 @@ async function interpretaPeriodo(mensagem) {
     // Verificar se a mensagem contém palavras-chave de tarde
     for (const keyword of keywordsTarde) {
       if (msgLower.includes(keyword)) {
-        console.log(`Período da tarde identificado pela palavra-chave: ${keyword}`);
+        console.log(`Período da tarde identificado pela palavra-chave local: ${keyword}`);
         return 'T';
       }
     }
     
     // Se não encontrou nenhum período específico, retorna null
+    console.log('Nenhum período específico identificado localmente.');
     return null;
   } catch (error) {
-    console.error('Erro ao interpretar período:', error);
+    console.error('Erro ao interpretar período localmente:', error);
     return null;
   }
 }
@@ -1072,182 +1121,141 @@ user.numero = numero;
           }
           // At this point, user.osEscolhida should be set.
 
-          const dataInterp = await interpretarDataNatural(mensagem, 'default-agent', contexto, 'Frase do usuário: "' + mensagem + '"');
-          console.log('dataInterp: ' + dataInterp);
+          const interpretacao = await interpretaDataePeriodo({
+            mensagem,
+            agentId: 'default-agent',
+            dados: contexto,
+            promptExtra: 'Tentando extrair data e período da mensagem do usuário.'
+          });
 
-          if (!dataInterp || !dayjs(dataInterp).isValid()) {
-            resposta = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Data inválida. Informe novamente, por favor.'
-            });
+          console.log('Resultado interpretaDataePeriodo:', interpretacao);
+
+          if (!interpretacao || !interpretacao.data_interpretada || !dayjs(interpretacao.data_interpretada).isValid()) {
+            // Se não conseguiu interpretar data, ou data é inválida
+            // Verificar se pelo menos um período foi interpretado para dar uma resposta mais contextual
+            if (interpretacao && interpretacao.periodo_interpretado) {
+              user.periodoAgendamento = interpretacao.periodo_interpretado; // Salva o período se encontrado
+              resposta = `Entendi que você prefere o período da ${interpretacao.periodo_interpretado === 'M' ? 'manhã' : 'tarde'}. Para qual data seria?`;
+              user.etapaAtual = 'extrair_data'; // Mantém na extração de data
+            } else {
+              resposta = await gerarMensagemDaIntent({
+                intent: 'extrair_data', // Ou uma intent específica para data inválida
+                agentId: 'default-agent',
+                dados: contexto,
+                promptExtra: 'Não consegui entender a data. Por favor, informe novamente, por exemplo: "amanhã de manhã" ou "dia 25 à tarde".'
+              });
+            }
             break;
           }
 
-          user.dataInterpretada = dataInterp;
-          
-          // Verificar se a mensagem contém informação de período (manhã/tarde)
-          const msgLower = mensagem.toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "");
-          
-          // Palavras-chave para identificar período da manhã
-          const keywordsManha = [
-            'manha', 'manhã', 'matutino', 'cedo', 'antes do almoco', 'antes do almoço',
-            'antes do meio dia', 'am', 'a.m', 'a.m.', 'de manha', 'pela manha', 'pela manhã'
-          ];
-          
-          // Palavras-chave para identificar período da tarde
-          const keywordsTarde = [
-            'tarde', 'vespertino', 'depois do almoco', 'depois do almoço', 
-            'depois do meio dia', 'pm', 'p.m', 'p.m.', 'de tarde', 'pela tarde'
-          ];
-          
-          // Verificar se a mensagem contém palavras-chave de manhã ou tarde
-          let periodoDetectado = null;
-          for (const keyword of keywordsManha) {
-            if (msgLower.includes(keyword)) {
-              console.log(`Período da manhã identificado pela palavra-chave: ${keyword}`);
-              periodoDetectado = 'M';
-              break;
-            }
-          }
-          
-          if (!periodoDetectado) {
-            for (const keyword of keywordsTarde) {
-              if (msgLower.includes(keyword)) {
-                console.log(`Período da tarde identificado pela palavra-chave: ${keyword}`);
-                periodoDetectado = 'T';
-                break;
-              }
-            }
-          }
-          
-          // Se detectou período na mensagem, atualizar user.periodoAgendamento
-          if (periodoDetectado) {
-            user.periodoAgendamento = periodoDetectado;
-            console.log(`Período detectado na mensagem: ${periodoDetectado === 'M' ? 'manhã' : 'tarde'}`);
-          }
-          
-          
-          // The block that previously called verificarOSEscolhida is removed as ensureOSEscolhida handles it.
-          
-          // Verificar se a data é válida usando a função verificarDisponibilidade
-          if (user.osEscolhida) { // This check is still valid. ensureOSEscolhida should have populated user.osEscolhida.
-            console.log(`Verificando disponibilidade com verificarDisponibilidade: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}`);
-            const resultadoDisponibilidade = await verificarDisponibilidade(
-              user.osEscolhida, 
-              user.dataInterpretada, 
-              'M' // Verificamos apenas se a data é válida, o período é irrelevante neste ponto
+          user.dataInterpretada = interpretacao.data_interpretada;
+          user.periodoAgendamento = interpretacao.periodo_interpretado; // Pode ser null se não encontrado
+
+          // Verificar validade da data (final de semana, range)
+          if (user.osEscolhida) {
+            const resultadoDisponibilidadeData = await verificarDisponibilidade(
+              user.osEscolhida,
+              user.dataInterpretada,
+              'M' // Período é irrelevante aqui, só checando a data
             );
-            
-            // Verificar se é final de semana
-            if (resultadoDisponibilidade.ehFinalDeSemana) {
+
+            if (resultadoDisponibilidadeData.ehFinalDeSemana) {
               const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
-              const diaSemanaTexto = resultadoDisponibilidade.diaDaSemana;
+              const diaSemanaTexto = resultadoDisponibilidadeData.diaDaSemana;
               resposta = `Desculpe, não realizamos agendamentos para finais de semana. A data ${dataFormatada} é um ${diaSemanaTexto}. Por favor, escolha uma data de segunda a sexta-feira.`;
-              // Limpar a data interpretada para que o usuário possa escolher outra
-              user.dataInterpretada = null;
+              user.dataInterpretada = null; // Limpa data inválida
+              user.periodoAgendamento = null; // Limpa período também
               break;
             }
-            
-            // Verificar se a data está dentro do intervalo permitido
-            if (!resultadoDisponibilidade.dentroDoRange) {
+
+            if (!resultadoDisponibilidadeData.dentroDoRange) {
               const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
-              const dataMinima = resultadoDisponibilidade.dataMinima ? dayjs(resultadoDisponibilidade.dataMinima).format('DD/MM/YYYY') : 'N/A';
-              const dataMaxima = resultadoDisponibilidade.dataMaxima ? dayjs(resultadoDisponibilidade.dataMaxima).format('DD/MM/YYYY') : 'N/A';
-              
-              let mensagemRange = `Desculpe, não posso agendar para ${dataFormatada}.`;
-              
-              if (resultadoDisponibilidade.dataMinima && resultadoDisponibilidade.dataMaxima) {
+              // ... (lógica de mensagem de range existente)
+               let mensagemRange = `Desculpe, não posso agendar para ${dataFormatada}.`;
+              const dataMinima = resultadoDisponibilidadeData.dataMinima ? dayjs(resultadoDisponibilidadeData.dataMinima).format('DD/MM/YYYY') : 'N/A';
+              const dataMaxima = resultadoDisponibilidadeData.dataMaxima ? dayjs(resultadoDisponibilidadeData.dataMaxima).format('DD/MM/YYYY') : 'N/A';
+              if (resultadoDisponibilidadeData.dataMinima && resultadoDisponibilidadeData.dataMaxima) {
                 mensagemRange += ` O período disponível para agendamento é entre ${dataMinima} e ${dataMaxima}.`;
-              } else if (resultadoDisponibilidade.dataMinima) {
+              } else if (resultadoDisponibilidadeData.dataMinima) {
                 mensagemRange += ` A data mais próxima disponível para agendamento é ${dataMinima}.`;
-              } else if (resultadoDisponibilidade.dataMaxima) {
+              } else if (resultadoDisponibilidadeData.dataMaxima) {
                 mensagemRange += ` A última data disponível para agendamento é ${dataMaxima}.`;
               } else {
                 mensagemRange += ` Não há datas disponíveis para agendamento no momento.`;
               }
-              
               resposta = mensagemRange + ` Gostaria de escolher outra data?`;
-              // Limpar a data interpretada para que o usuário possa escolher outra
               user.dataInterpretada = null;
+              user.periodoAgendamento = null;
               break;
             }
           } else {
-            // Se não temos OS escolhida, fazemos a verificação tradicional
-            const diaDaSemana = dayjs(user.dataInterpretada).day(); // 0 = domingo, 6 = sábado
+             // Verificação de final de semana genérica se não houver OS (improvável neste ponto do fluxo)
+            const diaDaSemana = dayjs(user.dataInterpretada).day();
             if (diaDaSemana === 0 || diaDaSemana === 6) {
               const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
               const diaSemanaTexto = diaDaSemana === 0 ? 'domingo' : 'sábado';
               resposta = `Desculpe, não realizamos agendamentos para finais de semana. A data ${dataFormatada} é um ${diaSemanaTexto}. Por favor, escolha uma data de segunda a sexta-feira.`;
-              // Limpar a data interpretada para que o usuário possa escolher outra
               user.dataInterpretada = null;
+              user.periodoAgendamento = null;
               break;
             }
           }
 
-          // Verificar se já temos período e OS para fazer o agendamento
-          if (user.periodoAgendamento && user.osList && user.osList.length > 0) {
-            // Se o usuário ainda não escolheu uma OS específica, mas só tem uma na lista, usamos ela
+          // Se temos data E período
+          if (user.dataInterpretada && user.periodoAgendamento) {
             if (!user.osEscolhida && user.osList.length === 1) {
               user.osEscolhida = user.osList[0];
-              console.log(`Auto-selecionando a única OS disponível: ${user.osEscolhida.id}`);
             }
-            
-            // Se temos OS escolhida, data e período, verificamos a disponibilidade
+
             if (user.osEscolhida) {
               try {
-                console.log(`Verificando disponibilidade para: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}, Período=${user.periodoAgendamento}`);
-                
-                // Verificar disponibilidade usando a função gerarSugestoesDeAgendamento
                 const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, {
                   dataEspecifica: user.dataInterpretada,
                   periodoEspecifico: user.periodoAgendamento
                 });
-                
+
                 if (!sugestoes || !sugestoes.sugestao) {
-                  // Data/período não disponível
                   const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
                   const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
                   resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Gostaria de tentar outra data ou período?`;
+                  // Não limpar data/período aqui, usuário pode querer tentar o mesmo dia em outro período
                   break;
                 }
                 
-                // Data/período disponível - pedir confirmação antes de agendar
                 const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
                 const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
                 const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
                 const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
-                
-                resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}).
-
-Confirma o agendamento para essa data?`;
-                
-                // Armazenar a sugestão para uso posterior
-                user.sugestaoData = user.dataInterpretada;
+                resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Confirma o agendamento para essa data?`;
+                user.sugestaoData = user.dataInterpretada; // Guardar para confirmação
                 user.sugestaoPeriodo = user.periodoAgendamento;
                 user.tipoUltimaPergunta = 'AGENDAMENTO';
-                user.aguardandoConfirmacao = true; // Flag para indicar que estamos aguardando confirmação
+                user.aguardandoConfirmacao = true;
+                user.etapaAtual = 'confirmar_agendamento'; // Próxima etapa
               } catch (error) {
-                console.error('Erro ao verificar disponibilidade:', error);
+                console.error('Erro ao verificar disponibilidade (extrair_data com data e período):', error);
                 resposta = 'Desculpe, ocorreu um erro ao verificar a disponibilidade. Por favor, tente novamente mais tarde.';
               }
             } else {
-              // Temos data e período, mas não temos OS escolhida
-              resposta = `Entendi que você deseja agendar para ${dayjs(dataInterp).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Agora preciso saber qual OS você deseja agendar. Por favor, informe o número da OS.`;
+              // Tem data e período, mas não OS (se ensureOSEscolhida falhou ou não foi chamada antes)
+              const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+              const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+              resposta = `Entendi que você deseja agendar para ${dataFormatada} no período da ${periodoExtenso}. Agora preciso saber para qual OS seria o agendamento. Pode me informar o número?`;
+              user.etapaAtual = 'escolher_os';
             }
+          } else if (user.dataInterpretada && !user.periodoAgendamento) {
+            // Temos data, mas FALTA período
+            const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+            resposta = await gerarMensagemDaIntent({
+              intent: 'extrair_hora', // Mudar para intent de pedir período
+              agentId: 'default-agent',
+              dados: contexto,
+              promptExtra: `Ok, anotei a data ${dataFormatada}. Você prefere o período da manhã ou da tarde?`
+            });
+            user.etapaAtual = 'extrair_hora';
           } else {
-            // Se não temos período, pedir ao usuário
-            resposta = user.periodoAgendamento
-              ? `📅 Confirmo ${dayjs(dataInterp).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`
-              : await gerarMensagemDaIntent({
-                  intent: 'extrair_hora',
-                  agentId: 'default-agent',
-                  dados: contexto,
-                  promptExtra: 'Agora escolha um período (manhã ou tarde).'
-                });
+            // Cenário inesperado ou dados insuficientes após a primeira tentativa de interpretação
+             resposta = "Não consegui entender completamente sua solicitação de data e período. Pode tentar novamente, por favor? Exemplo: 'quero agendar para amanhã à tarde'.";
           }
           break;
         }
@@ -1269,120 +1277,145 @@ Confirma o agendamento para essa data?`;
           }
           // At this point, user.osEscolhida should be set.
 
-          const periodoInterp = await interpretaPeriodo(mensagem);
+          const periodoInterp = await interpretaPeriodo(mensagem); // Tenta extrair M ou T da mensagem
+
           if (!periodoInterp || !['M', 'T'].includes(periodoInterp)) {
-            resposta = await gerarMensagemDaIntent({
-              intent: 'faltando_hora',
-              agentId: 'default-agent',
-              dados: contexto,
-              promptExtra: 'Período inválido. Tente de novo, por favor.'
-            });
-            break;
+            // Se não conseguiu extrair um período válido (M ou T)
+            // Verificar se o usuário forneceu uma data ao invés de um período
+            const possivelData = await interpretaDataePeriodo({ mensagem, agentId: 'default-agent', dados: contexto });
+            if (possivelData && possivelData.data_interpretada) {
+              user.dataInterpretada = possivelData.data_interpretada;
+              user.periodoAgendamento = possivelData.periodo_interpretado; // Usa o período da interpretação completa, se houver
+
+              // Validar a data e prosseguir como se tivesse vindo de 'extrair_data'
+              // (Esta lógica é um pouco repetida de 'extrair_data', idealmente poderia ser uma função helper)
+              if (user.osEscolhida) {
+                const resultadoDispData = await verificarDisponibilidade(user.osEscolhida, user.dataInterpretada, 'M');
+                if (resultadoDispData.ehFinalDeSemana) {
+                  resposta = `Desculpe, não agendamos para finais de semana. ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} é ${resultadoDispData.diaDaSemana}. Escolha uma data de segunda a sexta.`;
+                  user.dataInterpretada = null; user.periodoAgendamento = null; break;
+                }
+                if (!resultadoDispData.dentroDoRange) {
+                  resposta = `A data ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} está fora do período que podemos agendar. Gostaria de tentar outra?`; // Simplificado
+                  user.dataInterpretada = null; user.periodoAgendamento = null; break;
+                }
+              }
+              // Se a data é válida e ainda não temos período, pedir período
+              if (user.dataInterpretada && !user.periodoAgendamento) {
+                 resposta = `Ok, anotei a data ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')}. Você prefere o período da manhã ou da tarde?`;
+                 user.etapaAtual = 'extrair_hora'; // Mantém para pedir o período
+                 break;
+              }
+              // Se temos data e período (da nova interpretação), seguir para confirmação
+              if (user.dataInterpretada && user.periodoAgendamento) {
+                // Vai para a lógica de confirmação/disponibilidade mais abaixo
+              } else {
+                 resposta = "Não entendi o período. Por favor, diga manhã ou tarde.";
+                 break;
+              }
+            } else {
+              // Se não foi data nem período válido
+              resposta = await gerarMensagemDaIntent({
+                intent: 'faltando_hora', // ou 'extrair_hora' com prompt específico
+                agentId: 'default-agent',
+                dados: contexto,
+                promptExtra: 'Não consegui identificar o período. Por favor, diga se prefere manhã ou tarde.'
+              });
+              break;
+            }
+          }
+          
+          // Se um período válido (M/T) foi interpretado diretamente da mensagem original
+          if (periodoInterp) {
+            user.periodoAgendamento = periodoInterp;
           }
 
-          user.periodoAgendamento = periodoInterp;
-          
-          // The block that previously called verificarOSEscolhida is removed.
-          
-          // Verificar se já temos data e OS para fazer o agendamento
-          // PRIMEIRO, VERIFICAR SE TEMOS A DATA. SE NÃO, PEDIR.
+          // Agora, verificar se já temos uma data na sessão (user.dataInterpretada)
           if (!user.dataInterpretada) {
+            // Se não temos data, mas temos período, pedir a data.
             const periodoExtensoUser = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
             resposta = `Entendi que você prefere o período da ${periodoExtensoUser}. Para qual data seria o agendamento?`;
-            // Manter a etapa para que o próximo input seja processado como extrair_data ou agendar_data
+            user.etapaAtual = 'extrair_data'; // Mudar para pedir a data
             break;
           }
 
-          // SE TEMOS A DATA, CONTINUAR COM A VERIFICAÇÃO DE OS E DISPONIBILIDADE
-          if (user.dataInterpretada && user.osList && user.osList.length > 0) {
-            // Se o usuário ainda não escolheu uma OS específica, mas só tem uma na lista, usamos ela
-            if (!user.osEscolhida && user.osList.length === 1) {
+          // SE TEMOS DATA (da sessão) E PERÍODO (da mensagem atual ou recuperado acima),
+          // continuar com a verificação de OS e disponibilidade.
+          if (user.dataInterpretada && user.periodoAgendamento) {
+            if (!user.osEscolhida && user.osList && user.osList.length === 1) {
               user.osEscolhida = user.osList[0];
-              console.log(`Auto-selecionando a única OS disponível: ${user.osEscolhida.id}`);
             }
-            
-            // Se temos OS escolhida, data e período, verificamos a disponibilidade
+
             if (user.osEscolhida) {
-              // Verificar se a data e período estão disponíveis
               try {
-                console.log(`Verificando disponibilidade para: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}, Período=${user.periodoAgendamento}`);
-                
-                // Verificar disponibilidade usando a função verificarDisponibilidade
-                console.log(`Verificando disponibilidade com verificarDisponibilidade: OS=${user.osEscolhida.id}, Data=${user.dataInterpretada}, Período=${user.periodoAgendamento}`);
-                const resultadoDisponibilidade = await verificarDisponibilidade(
-                  user.osEscolhida, 
-                  user.dataInterpretada, 
-                  user.periodoAgendamento
-                );
-                
-                // Verificar se é final de semana
-                if (resultadoDisponibilidade.ehFinalDeSemana) {
-                  const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
-                  const diaSemanaTexto = resultadoDisponibilidade.diaDaSemana;
-                  resposta = `Desculpe, não realizamos agendamentos para finais de semana. A data ${dataFormatada} é um ${diaSemanaTexto}. Por favor, escolha uma data de segunda a sexta-feira.`;
-                  // Limpar a data interpretada para que o usuário possa escolher outra
-                  user.dataInterpretada = null;
+                // Validar a data novamente (caso tenha vindo da sessão e possa ter se tornado inválida)
+                const resultadoDispDataVal = await verificarDisponibilidade(user.osEscolhida, user.dataInterpretada, user.periodoAgendamento);
+                if (resultadoDispDataVal.ehFinalDeSemana) {
+                  resposta = `A data ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} é um ${resultadoDispDataVal.diaDaSemana}, e não agendamos aos finais de semana. Por favor, escolha outra data.`;
+                  user.dataInterpretada = null; user.periodoAgendamento = null; // Limpa para nova tentativa
+                  user.etapaAtual = 'extrair_data';
                   break;
                 }
-                
-                // Verificar disponibilidade
-                if (!resultadoDisponibilidade.disponivel) {
-                  // Data/período não disponível
+                 if (!resultadoDispDataVal.dentroDoRange) {
+                    resposta = `A data ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} está fora do nosso período de agendamento. Por favor, escolha outra data.`;
+                    user.dataInterpretada = null; user.periodoAgendamento = null;
+                    user.etapaAtual = 'extrair_data';
+                    break;
+                }
+                // Se a data é válida, verificar disponibilidade do período específico
+                const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                  dataEspecifica: user.dataInterpretada,
+                  periodoEspecifico: user.periodoAgendamento
+                });
+
+                if (!sugestoes || !sugestoes.sugestao) {
                   const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
                   const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-                  
-                  // Verificar se existem outros períodos disponíveis para a mesma data
-                  if (resultadoDisponibilidade.periodosDisponiveis && resultadoDisponibilidade.periodosDisponiveis.length > 0) {
-                    const outrosPeriodos = resultadoDisponibilidade.periodosDisponiveis
-                      .map(p => p === 'M' ? 'manhã' : 'tarde')
-                      .join(' e ');
-                    resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Porém, temos disponibilidade no período da ${outrosPeriodos}. Gostaria de agendar nesse período?`;
+                  // Verificar se há outros períodos disponíveis para a mesma data
+                  const outrosPeriodosDisponiveis = [];
+                  const periodoAlternativo = user.periodoAgendamento === 'M' ? 'T' : 'M';
+                  const sugestaoAlternativa = await gerarSugestoesDeAgendamento(user.osEscolhida, {dataEspecifica: user.dataInterpretada, periodoEspecifico: periodoAlternativo});
+                  if (sugestaoAlternativa && sugestaoAlternativa.sugestao) {
+                    outrosPeriodosDisponiveis.push(periodoAlternativo);
+                  }
+
+                  if (outrosPeriodosDisponiveis.length > 0) {
+                    const periodoAltFormatado = outrosPeriodosDisponiveis.map(p => p === 'M' ? 'manhã' : 'tarde').join(' ou ');
+                    resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Mas temos disponibilidade no período da ${periodoAltFormatado} neste dia. Gostaria de agendar?`;
                   } else {
                     resposta = `Desculpe, não encontrei disponibilidade para ${dataFormatada} no período da ${periodoExtenso}. Gostaria de tentar outra data ou período?`;
                   }
                   break;
                 }
                 
-                // Obter as sugestões para uso posterior
-                const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, {
-                  dataEspecifica: user.dataInterpretada,
-                  periodoEspecifico: user.periodoAgendamento
-                });
-                
-                // Data/período disponível - pedir confirmação antes de agendar
                 const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
                 const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
                 const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
                 const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
-                
-                resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}).
-
-Confirma o agendamento para essa data?`;
-                
-                // Armazenar a sugestão para uso posterior
+                resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Confirma o agendamento?`;
                 user.sugestaoData = user.dataInterpretada;
                 user.sugestaoPeriodo = user.periodoAgendamento;
                 user.tipoUltimaPergunta = 'AGENDAMENTO';
-                user.aguardandoConfirmacao = true; // Flag para indicar que estamos aguardando confirmação
-                
+                user.aguardandoConfirmacao = true;
+                user.etapaAtual = 'confirmar_agendamento';
               } catch (error) {
-                console.error('Erro ao verificar disponibilidade:', error);
+                console.error('Erro ao verificar disponibilidade (extrair_hora):', error);
                 resposta = 'Desculpe, ocorreu um erro ao verificar a disponibilidade. Por favor, tente novamente mais tarde.';
               }
             } else {
-              // Temos data e período, mas não temos OS escolhida
-              resposta = `Entendi que você deseja agendar para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Agora preciso saber qual OS você deseja agendar. Por favor, informe o número da OS.`;
+              // Tem data e período, mas não OS
+              resposta = `Entendi que o agendamento seria para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Para qual OS seria?`;
+              user.etapaAtual = 'escolher_os';
             }
-          } else {
-            // Se não temos data, pedir ao usuário
-            resposta = user.dataInterpretada
-              ? `📅 Confirmo ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`
-              : await gerarMensagemDaIntent({
-                  intent: 'extrair_data',
-                  agentId: 'default-agent',
-                  dados: contexto,
-                  promptExtra: 'Agora informe a data.'
-                });
+          } else if (!user.dataInterpretada && user.periodoAgendamento) {
+            // Se de alguma forma só temos período mas não data (já coberto acima, mas como segurança)
+             const periodoExtensoUser = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+            resposta = `Entendi que você prefere o período da ${periodoExtensoUser}. Para qual data seria o agendamento?`;
+            user.etapaAtual = 'extrair_data';
+          }
+          else {
+            // Fallback caso algo não seja coberto
+            resposta = "Preciso da data e do período (manhã ou tarde) para agendar. Poderia me informar?";
           }
           break;
         }
