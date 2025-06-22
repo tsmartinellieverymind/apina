@@ -637,7 +637,7 @@ async function buscarOSAbertas() {
     body.append('query', 'A'); // Status A = Aberto
     body.append('oper', '=');
     body.append('page', '1');
-    body.append('rp', '10000');
+    body.append('rp', '100');
     body.append('sortname', 'su_oss_chamado.id');
     body.append('sortorder', 'desc');
     
@@ -649,6 +649,12 @@ async function buscarOSAbertas() {
     
     console.log(api.getUri());
     console.log('[buscarOSAbertas] Resposta bruta da API:', JSON.stringify(response.data, null, 2));
+
+    // Filtrar OSs com bairro preenchido e limitar a 1 resultado
+    let registros = response.data && response.data.registros ? response.data.registros : [];
+    const registrosComBairro = registros.filter(os => os.bairro && os.bairro.trim() !== '');
+    console.log(`[buscarOSAbertas] Total retornado da API: ${registros.length}, com bairro preenchido: ${registrosComBairro.length}`);
+    return registrosComBairro.slice(0, 1);
     
     if (response.data && response.data.registros) {
       // Filtrar apenas OSs sem setor atribuído

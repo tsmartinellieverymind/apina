@@ -10,6 +10,7 @@
 const cron = require('node-cron');
 const mongoose = require('mongoose');
 const ixcService = require('../services/ixcService');
+const openaiService = require('../services/openaiService');
 require('dotenv').config();
 
 /**
@@ -62,46 +63,88 @@ async function atualizarOSComSetor(osId, setorId) {
 /**
  * Processa todas as OSs abertas sem setor
  */
+// Número máximo de OS a processar por execução (ajuste conforme necessário ou use variável de ambiente)
+const MAX_OS_PARA_PROCESSAR = process.env.MAX_OS_PARA_PROCESSAR ? parseInt(process.env.MAX_OS_PARA_PROCESSAR) : 10;
+
 async function processarOSAbertas() {
   try {
     console.log('Iniciando processamento de OSs abertas sem setor...');
     
+    // Conectar ao MongoDB para buscar a lista de bairros com seus setores
+    await mongoose.connect(process.env.MONGO_URI, {
+      tls: true,
+      tlsAllowInvalidCertificates: true
+    });
+    
+    // Buscar a lista de bairros com seus setores
+    const db = mongoose.connection.useDb('IXC_SETORES');
+    const setoresCollection = db.collection('setores');
+    console.log('[DEBUG] Buscando lista de bairros/setores no MongoDB...');
+    const listaBairros = await setoresCollection.find({}).toArray();
+    console.log('[DEBUG] Resultado da busca de bairros/setores:', Array.isArray(listaBairros) ? `Total: ${listaBairros.length}` : typeof listaBairros);
+    if (Array.isArray(listaBairros) && listaBairros.length > 0) {
+      console.log('[DEBUG] Exemplo de setor:', JSON.stringify(listaBairros[0], null, 2));
+    }
+    
+    console.log(`Encontrados ${listaBairros.length} bairros na coleção de setores.`);
+    
+    // Carregar configurações de agendamento para determinar o tipo de serviço
+    const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos');
+    
     // Buscar OSs abertas sem setor atribuído
-    const osAbertas = await buscarOSAbertas();
+    let osAbertas = await buscarOSAbertas();
     
     if (osAbertas.length === 0) {
       console.log('Nenhuma OS para processar.');
+      await mongoose.disconnect();
       return;
     }
     
+    // Filtrar OSs que possuem bairro preenchido
+    osAbertas = osAbertas.filter(os => !!os.bairro && os.bairro.trim() !== '');
+    if (osAbertas.length === 0) {
+      console.log('Nenhuma OS com bairro definido para processar.');
+      await mongoose.disconnect();
+      return;
+    }
+    // Limitar o número de OSs processadas
+    osAbertas = osAbertas.slice(0, MAX_OS_PARA_PROCESSAR);
+    console.log(`Processando ${osAbertas.length} OS(s) abertas com bairro definido (limite: ${MAX_OS_PARA_PROCESSAR})...`);
+    
     // Processar cada OS
     for (const os of osAbertas) {
-      // Buscar detalhes da OS (bairro e tipo de serviço)
-      const detalhesOS = await buscarDetalhesOS(os);
-      
-      if (!detalhesOS) {
-        console.error(`Não foi possível obter detalhes da OS ${os.id}. Pulando...`);
+       // Usar diretamente o bairro da OS
+       const bairro = os.bairro;
+      if (!bairro) {
+        continue;
+      }
+      // Determinar o tipo de serviço com base no id_assunto
+      const config = configuracoesAgendamento.find(c => c.id_assunto === os.id_assunto);
+      const tipo = config ? config.tipo : 'manutencao';
+      let setorId = null;
+      try {
+        setorId = await openaiService.buscarSetorPorBairro(bairro, listaBairros, tipo);
+      } catch (e) {
+        console.error(`[ERRO] Falha ao buscar setor para OS ${os.id}:`, e.message);
+        continue;
+      }
+      if (!setorId) {
         continue;
       }
 
-      const idAssunto = os.id_assunto;
-      
-      
-      // Buscar setor correspondente ao bairro usando a função do ixcService
-      const setorId = await openaiService.buscarSetorPorBairro(detalhesOS.bairro, detalhesOS.tipoServico);
-      
-      if (!setorId) {
-        console.error(`Não foi possível determinar o setor para o bairro "${detalhesOS.bairro}". Pulando...`);
-        continue;
-      }
-      
-      // Atualizar a OS com o setor determinado
-      await atualizarOSComSetor(detalhesOS.osId, setorId);
     }
     
     console.log('Processamento de OSs abertas sem setor concluído.');
   } catch (error) {
     console.error('Erro ao processar OSs abertas:', error.message);
+  } finally {
+    // Fechar a conexão com o MongoDB
+    try {
+      await mongoose.disconnect();
+      console.log('Conexão com MongoDB fechada.');
+    } catch (err) {
+      console.error('Erro ao fechar conexão com MongoDB:', err.message);
+    }
   }
 }
 

@@ -446,12 +446,107 @@ Responda APENAS o JSON pedido.
   return json.posicao ?? null;
 }
 
+
+/**
+ * Busca o setor correspondente ao bairro e tipo de serviço
+ * @param {string} bairro - Nome do bairro
+ * @param {Array} listaBairros - Lista de bairros com seus respectivos IDs de setores
+ * @param {string} tipo - Tipo de serviço ('instalacao' ou 'manutencao')
+ * @returns {string|null} - ID do setor ou null se não encontrado
+ */
+async function buscarSetorPorBairro(bairro, listaBairros, tipo, agentId = 'default-agent') {
+
+  if (!bairro || !listaBairros || !tipo) {
+    return null;
+  }
+
+  // Tenta encontrar o objeto do bairro na lista
+  const bairroObj = listaBairros.find(b => b.bairro && b.bairro.trim().toLowerCase() === bairro.trim().toLowerCase());
+  if (!bairroObj || typeof bairroObj.setores !== 'object' || bairroObj.setores === null) {
+    if (process.env.NODE_ENV !== 'production') {
+      let exemplos = Array.isArray(listaBairros) ? listaBairros.slice(0, 3).map(b => b.bairro) : listaBairros;
+      console.warn(`[DEBUG][buscarSetorPorBairro] Bairro não encontrado ou setores inválido:`, {
+        bairro, tipo, bairroObj: JSON.stringify(bairroObj),
+        listaBairrosResumo: {
+          total: Array.isArray(listaBairros) ? listaBairros.length : 'N/A',
+          exemplos
+        }
+      });
+    }
+    return null;
+  }
+  if (typeof bairroObj.setores[tipo] === 'undefined' || bairroObj.setores[tipo] === null) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[DEBUG][buscarSetorPorBairro] Tipo de setor não encontrado:`, {
+        bairro, tipo, setores: JSON.stringify(bairroObj.setores)
+      });
+    }
+    return null;
+  }
+  // Continua o fluxo normal (prompt OpenAI etc)
+
+  if (!bairro || !listaBairros || !tipo) {
+    return null;
+  }
+
+  const { loadAgent } = require('../app/engine/loader');
+  const { OpenAI } = require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const agent = loadAgent(agentId);
+
+  // Monta a lista de setores para o prompt
+  const setoresPrompt = listaBairros.map(s => `ID: ${s.ids[tipo] || 'N/A'} | Nome: ${s.nome || '-'} | Bairro: ${s.bairro}`).join('\n');
+
+  const prompt = `
+Você é ${agent.nome}, sua função é analisar uma lista de setores e identificar a qual ID de setor pertence um bairro informado pelo usuário.
+
+Contexto:
+- Você receberá uma lista de setores, cada um com seu id, nome e bairro atendido.
+- O usuário informará um bairro e o tipo de serviço desejado ('instalacao' ou 'manutencao').
+- Sua tarefa é encontrar o setor correspondente ao bairro informado, considerando o tipo de serviço.
+- Se não houver correspondência exata, escolha o setor mais próximo (por similaridade de nome de bairro).
+- Retorne apenas o ID do setor correspondente (apenas o valor do id, sem explicações ou texto extra).
+
+Lista de setores:
+${setoresPrompt}
+
+Bairro informado: "${bairro}"
+Tipo de serviço: "${tipo}"
+
+IMPORTANTE: Responda apenas com o ID do setor correspondente. Se não encontrar, responda "null".
+`;
+
+  console.log('[buscarSetorPorBairro][PROMPT ENVIADO AO OPENAI]:', prompt);
+
+  try {
+    const resposta = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: agent.personality },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 20
+    });
+    const content = resposta.choices[0].message.content.trim();
+    console.log('[buscarSetorPorBairro][RESPOSTA OPENAI]:', content);
+    // Retorna apenas o id se for um número ou string, senão null
+    if (content.toLowerCase() === 'null') return null;
+    return content;
+  } catch (error) {
+    console.error('[buscarSetorPorBairro][ERRO OPENAI]:', error.message);
+    return null;
+  }
+}
+
 module.exports = {
-responderComBaseNaIntent,
-interpretarDataNatural,
-interpretaDataePeriodo,
-interpretarNumeroOS,
-interpretarEscolhaOS,
-detectarIntentComContexto,
-gerarMensagemDaIntent
+  responderComBaseNaIntent,
+  interpretarDataNatural,
+  interpretaDataePeriodo,
+  interpretarNumeroOS,
+  interpretarEscolhaOS,
+  detectarIntentComContexto,
+  gerarMensagemDaIntent,
+  buscarSetorPorBairro
 };

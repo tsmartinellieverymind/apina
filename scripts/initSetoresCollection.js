@@ -1,46 +1,5 @@
-/**
- * Script para inicializar a coleção de configurações de setores no MongoDB
- * 
- * Este script cria a coleção 'configuracoes.setores' e insere dados iniciais
- * para mapear bairros aos setores correspondentes.
- */
-
 require('dotenv').config();
 const mongoose = require('mongoose');
-
-// Dados iniciais para a coleção de setores
-// Estes são exemplos e devem ser substituídos pelos dados reais
-const dadosIniciais = [
-  {
-    bairro: 'Centro',
-    id_setor: '1',
-    tipoServico: 'instalação',
-    criadoEm: new Date(),
-    criadoPor: 'sistema'
-  },
-  {
-    bairro: 'Centro',
-    id_setor: '2',
-    tipoServico: 'manutenção',
-    criadoEm: new Date(),
-    criadoPor: 'sistema'
-  },
-  {
-    bairro: 'Jardim América',
-    id_setor: '3',
-    tipoServico: 'instalação',
-    criadoEm: new Date(),
-    criadoPor: 'sistema'
-  },
-  {
-    bairro: 'Jardim América',
-    id_setor: '4',
-    tipoServico: 'manutenção',
-    criadoEm: new Date(),
-    criadoPor: 'sistema'
-  }
-  // Adicione mais mapeamentos conforme necessário
-];
 
 async function inicializarColecaoSetores() {
   try {
@@ -75,9 +34,82 @@ async function inicializarColecaoSetores() {
       // Inserir apenas os novos documentos
       let novosDocumentos = 0;
       
+      const dadosIniciais = [
+        { 
+          bairro: 'Centro', 
+          ids: {
+            instalacao: '1',
+            manutencao: '2'
+          }
+        },
+        { 
+          bairro: 'Jardim América', 
+          ids: {
+            instalacao: '3',
+            manutencao: '4'
+          }
+        },
+        { 
+          bairro: 'Bela Vista', 
+          ids: {
+            instalacao: '5',
+            manutencao: '6'
+          }
+        },
+        { 
+          bairro: 'Consolação', 
+          ids: {
+            instalacao: '7',
+            manutencao: '8'
+          }
+        },
+        { 
+          bairro: 'Higienópolis', 
+          ids: {
+            instalacao: '9',
+            manutencao: '10'
+          }
+        },
+        { 
+          bairro: 'Jardins', 
+          ids: {
+            instalacao: '11',
+            manutencao: '12'
+          }
+        },
+        { 
+          bairro: 'Itaim Bibi', 
+          ids: {
+            instalacao: '13',
+            manutencao: '14'
+          }
+        },
+        { 
+          bairro: 'Moema', 
+          ids: {
+            instalacao: '15',
+            manutencao: '16'
+          }
+        },
+        { 
+          bairro: 'Vila Olímpia', 
+          ids: {
+            instalacao: '17',
+            manutencao: '18'
+          }
+        },
+        { 
+          bairro: 'Pinheiros', 
+          ids: {
+            instalacao: '19',
+            manutencao: '20'
+          }
+        },
+      ];
+
       for (const dado of dadosIniciais) {
         const existente = documentosExistentes.find(doc => 
-          doc.bairro === dado.bairro && doc.tipoServico === dado.tipoServico
+          doc.bairro === dado.bairro && doc.ids.instalacao === dado.ids.instalacao && doc.ids.manutencao === dado.ids.manutencao
         );
         
         if (!existente) {
@@ -92,7 +124,82 @@ async function inicializarColecaoSetores() {
       
       // Criar a coleção e inserir os dados iniciais
       const setoresCollection = db.collection('configuracoes.setores');
-      const resultado = await setoresCollection.insertMany(dadosIniciais);
+
+      // Definir dados iniciais aqui para evitar referência indefinida
+      const dadosIniciaisNovos = [
+        { 
+          bairro: 'Centro', 
+          ids: {
+            instalacao: '1',
+            manutencao: '2'
+          }
+        },
+        { 
+          bairro: 'Jardim América', 
+          ids: {
+            instalacao: '3',
+            manutencao: '4'
+          }
+        },
+        { 
+          bairro: 'Bela Vista', 
+          ids: {
+            instalacao: '5',
+            manutencao: '6'
+          }
+        },
+        { 
+          bairro: 'Consolação', 
+          ids: {
+            instalacao: '7',
+            manutencao: '8'
+          }
+        },
+        { 
+          bairro: 'Higienópolis', 
+          ids: {
+            instalacao: '9',
+            manutencao: '10'
+          }
+        },
+        { 
+          bairro: 'Jardins', 
+          ids: {
+            instalacao: '11',
+            manutencao: '12'
+          }
+        },
+        { 
+          bairro: 'Itaim Bibi', 
+          ids: {
+            instalacao: '13',
+            manutencao: '14'
+          }
+        },
+        { 
+          bairro: 'Moema', 
+          ids: {
+            instalacao: '15',
+            manutencao: '16'
+          }
+        },
+        { 
+          bairro: 'Vila Olímpia', 
+          ids: {
+            instalacao: '17',
+            manutencao: '18'
+          }
+        },
+        { 
+          bairro: 'Pinheiros', 
+          ids: {
+            instalacao: '19',
+            manutencao: '20'
+          }
+        },
+      ];
+
+      const resultado = await setoresCollection.insertMany(dadosIniciaisNovos);
       
       console.log(`✅ Coleção criada com sucesso. ${resultado.insertedCount} documentos inseridos.`);
     }
