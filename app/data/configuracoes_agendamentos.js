@@ -19,42 +19,42 @@ const configuracoesAgendamento = [
     dataMaximaAgendamentoDias: 15,
     tipo: 'manutencao'
   },
-  
-  // Instalação de Internet
+
+  // 17 - INSTALAÇÃO COMBO(O.S) - IBIUNA
   {
-    id_assunto: 1,
-    prioridade: 2,
-    dataMinimaAgendamentoDias:1,
-    dataMaximaAgendamentoDias:9,
+    id_assunto: 17,
+    prioridade: 2, // prioridade ajustada automaticamente
+    dataMinimaAgendamentoDias: 5,
+    dataMaximaAgendamentoDias: 20,
     tipo: 'instalacao'
   },
-  
-  // Suporte Técnico
+
+  // 18 - MUDANÇA DE ENDEREÇO (O.S)
   {
-    id_assunto: 2,
-    prioridade: 1,
-    dataMinimaAgendamentoDias: 1,
-    dataMaximaAgendamentoDias: 9,
-    tipo: 'manutencao'
-  },
-  
-  // Cobrança
-  {
-    id_assunto: 3,
-    prioridade: 3,
-    dataMinimaAgendamentoDias: 1,
+    id_assunto: 18,
+    prioridade: 3, // prioridade ajustada automaticamente
+    dataMinimaAgendamentoDias: 3,
     dataMaximaAgendamentoDias: 10,
     tipo: 'instalacao'
   },
 
-    // Cobrança
-    {
-      id_assunto: 15,
-      prioridade: 3,
-      dataMinimaAgendamentoDias: 1,
-      dataMaximaAgendamentoDias: 10,
-      tipo: 'instalacao'
-    }
+  // 19 - TV REPARO (O.S)
+  {
+    id_assunto: 19,
+    prioridade: 1, // prioridade ajustada automaticamente
+    dataMinimaAgendamentoDias: 1,
+    dataMaximaAgendamentoDias: 3,
+    tipo: 'manutencao'
+  },
+
+  // 20 - VISTORIA TECNICA (OS)
+  {
+    id_assunto: 20,
+    prioridade: 2, // prioridade ajustada automaticamente
+    dataMinimaAgendamentoDias: 3,
+    dataMaximaAgendamentoDias: 10,
+    tipo: 'manutencao'
+  }
 ];
 
 module.exports = configuracoesAgendamento;
