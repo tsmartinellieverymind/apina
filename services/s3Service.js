@@ -3,26 +3,20 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Desativa verificação de certificado SSL para desenvolvimento
-// IMPORTANTE: Remover em produção
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 
 // Carrega as variáveis de ambiente com caminho absoluto para garantir
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 // Debug das variáveis de ambiente
 const bucketName = process.env.AWS_S3_BUCKET;
-console.log('[S3Service] Inicializando com bucket:', bucketName);
 
 // Configurações iniciais com debug
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 const region = process.env.AWS_REGION;
 
-console.log('[AWS] Configurando cliente S3:');
-console.log(`- Access Key ID: ${accessKeyId ? accessKeyId.substring(0, 5) + '...' : 'indefinido'}`); 
-console.log(`- Secret Access Key: ${secretAccessKey ? '✅ Definido (oculto)' : '❌ Indefinido'}`);
-console.log(`- Region: ${region || 'indefinido'}`);
+
 
 // Configuração do cliente S3 com configurações adicionais para resolver problemas de conexão
 const s3 = new AWS.S3({

@@ -114,6 +114,7 @@ const intentsOtimizado = {
       "amanhã",
       "dia 20",
       "sábado",
+      "Pode ser amanhã?",
       "na próxima segunda-feira",
       "dia 15/06",
       "semana que vem",

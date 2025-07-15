@@ -16,11 +16,11 @@ function logEstado({ numero, user, intent, resposta }) {
 
   // Todos os atributos restantes do user (exceto os já destacados)
   const extras = {};
-  // Object.keys(user).forEach(key => {
-  //   if (!(key in principais)) {
-  //     extras[key] = user[key];
-  //   }
-  // });
+  Object.keys(user).forEach(key => {
+    if (!(key in principais)) {
+      extras[key] = user[key];
+    }
+  });
 
   // Exibe tabela com principais e extras
   console.table({ ...principais, ...extras });

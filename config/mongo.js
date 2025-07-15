@@ -7,13 +7,6 @@ require('dotenv').config();
  */
 async function conectarMongo() {
   try {
-    // Remover credenciais da URI para log seguro
-    const uriSegura = process.env.MONGO_URI ? 
-      process.env.MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '\/\/$1:****@') : 
-      'URI não definida';
-    
-    console.log(`Tentando conectar ao MongoDB: ${uriSegura}`);
-    
     // Opções de conexão
     const options = {
       tls: true,
@@ -25,22 +18,10 @@ async function conectarMongo() {
     
     await mongoose.connect(process.env.MONGO_URI, options);
     
-    console.log('✅ Conectado ao MongoDB com sucesso!');
     return true;
   } catch (err) {
-    console.error('❌ Erro ao conectar no MongoDB:', err);
-    
-    // Fornecer informações adicionais sobre o erro
-    if (err.message && err.message.includes('ENOTFOUND')) {
-      console.log('⚠️ Verifique se o endereço do servidor MongoDB está correto.');
-    } else if (err.message && err.message.includes('Authentication failed')) {
-      console.log('⚠️ Falha na autenticação. Verifique usuário e senha.');
-    } else if (err.message && err.message.includes('whitelist')) {
-      console.log('⚠️ Seu IP não está na lista de IPs permitidos do MongoDB Atlas.');
-      console.log('Acesse https://www.mongodb.com/docs/atlas/security-whitelist/ para adicionar seu IP.');
-    }
-    
-    // Não encerrar o processo, apenas retornar falso
+    // Não logar o erro aqui para não poluir o console na inicialização
+    // Apenas retornar falso. O erro será tratado por quem chama a função.
     return false;
   }
 }

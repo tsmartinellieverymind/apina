@@ -46,16 +46,17 @@ async function buscarDetalhesOS(os) {
 
 /**
  * Atualiza a OS com o setor determinado
- * @param {string} osId - ID da OS
+ * @param {Object} os - Objeto da OS
  * @param {string} setorId - ID do setor
  * @returns {Promise<boolean>} Sucesso da atualização
  */
-async function atualizarOSComSetor(osId, setorId) {
+async function atualizarOSComSetor(os, setorId) {
   try {
     // Usando o serviço IXC para atualizar a OS com o setor
-    return await ixcService.atualizarOSComSetor(osId, setorId);
+    const ok = await ixcService.atualizarOSComSetor(os, setorId);
+    return ok;
   } catch (error) {
-    console.error(`Erro ao atualizar OS ${osId} com o setor ${setorId}:`, error.message);
+    console.error(`Erro ao atualizar OS ${os.id} com o setor ${setorId}:`, error.message);
     return false;
   }
 }
@@ -64,7 +65,7 @@ async function atualizarOSComSetor(osId, setorId) {
  * Processa todas as OSs abertas sem setor
  */
 // Número máximo de OS a processar por execução (ajuste conforme necessário ou use variável de ambiente)
-const MAX_OS_PARA_PROCESSAR = process.env.MAX_OS_PARA_PROCESSAR ? parseInt(process.env.MAX_OS_PARA_PROCESSAR) : 10;
+const MAX_OS_PARA_PROCESSAR = process.env.MAX_OS_PARA_PROCESSAR ? parseInt(process.env.MAX_OS_PARA_PROCESSAR) : 1;
 
 async function processarOSAbertas() {
   try {
@@ -76,23 +77,21 @@ async function processarOSAbertas() {
       tlsAllowInvalidCertificates: true
     });
     
-    // Buscar a lista de bairros com seus setores
-    const db = mongoose.connection.useDb('IXC_SETORES');
+    // Buscar a lista de bairros com seus setores do banco correto (APENAS UMA VEZ)
+    const db = mongoose.connection.useDb('configuracoes');
     const setoresCollection = db.collection('setores');
-    console.log('[DEBUG] Buscando lista de bairros/setores no MongoDB...');
-    const listaBairros = await setoresCollection.find({}).toArray();
-    console.log('[DEBUG] Resultado da busca de bairros/setores:', Array.isArray(listaBairros) ? `Total: ${listaBairros.length}` : typeof listaBairros);
-    if (Array.isArray(listaBairros) && listaBairros.length > 0) {
-      console.log('[DEBUG] Exemplo de setor:', JSON.stringify(listaBairros[0], null, 2));
-    }
-    
-    console.log(`Encontrados ${listaBairros.length} bairros na coleção de setores.`);
+    const todosSetores = await setoresCollection.find({setores: {$exists: true}}).toArray();
+    // if (Array.isArray(todosSetores) && todosSetores.length > 0) {
+    //   const nomesBairros = todosSetores.map(b => b.bairro);
+    //   console.log('[DEBUG] Bairros encontrados:', nomesBairros.join(', '));
+    // }
+    console.log(`Encontrados ${todosSetores.length} bairros na coleção de setores.`);
     
     // Carregar configurações de agendamento para determinar o tipo de serviço
     const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos');
     
     // Buscar OSs abertas sem setor atribuído
-    let osAbertas = await buscarOSAbertas();
+    let osAbertas = await ixcService.buscarOSAbertaComBairro();
     
     if (osAbertas.length === 0) {
       console.log('Nenhuma OS para processar.');
@@ -113,25 +112,47 @@ async function processarOSAbertas() {
     
     // Processar cada OS
     for (const os of osAbertas) {
-       // Usar diretamente o bairro da OS
-       const bairro = os.bairro;
-      if (!bairro) {
-        continue;
-      }
+      const bairro = os.bairro;
+      if (!bairro) continue;
       // Determinar o tipo de serviço com base no id_assunto
-      const config = configuracoesAgendamento.find(c => c.id_assunto === os.id_assunto);
-      const tipo = config ? config.tipo : 'manutencao';
-      let setorId = null;
+      const config = configuracoesAgendamento.find(c => String(c.id_assunto) === String(os.id_assunto));
+      if (!config) {
+        console.warn(`[WARN] Nenhuma configuração encontrada para id_assunto ${os.id_assunto}. Usando fallback 'manutencao'.`);
+      }
+      const tipoServico = config ? config.tipo : 'manutencao';
+      console.log(`[DEBUG] Configuração para id_assunto ${os.id_assunto}:`, config);
+      const tipoId = tipoServico === 'instalação' ? 'instalacao' : 'manutencao';
+      const listaBairrosFiltrada = todosSetores
+        .filter(s => s.setores && s.setores[tipoId])
+        .map(s => ({
+          bairro: s.bairro,
+          instalacao: s.setores.instalacao,
+          manutencao: s.setores.manutencao
+        }));
+      let setorBusca = null;
       try {
-        setorId = await openaiService.buscarSetorPorBairro(bairro, listaBairros, tipo);
+        setorBusca = await openaiService.findSetorByBairro(bairro, tipoServico, listaBairrosFiltrada);
       } catch (e) {
         console.error(`[ERRO] Falha ao buscar setor para OS ${os.id}:`, e.message);
         continue;
       }
-      if (!setorId) {
+      // Validar retorno estruturado
+      if (!setorBusca || !setorBusca.sucesso_busca || !setorBusca.id) {
+        console.error(`[ERRO] Não foi possível encontrar setor válido para o bairro "${bairro}" (OS ${os.id}). Retorno:`, setorBusca);
         continue;
       }
-
+      const setorId = setorBusca.id;
+      console.log(`[DEBUG] Setor encontrado para bairro "${bairro}": ${setorId}`);
+      try {
+        const atualizado = await ixcService.atualizarOSComSetor(os, setorId);
+        if (atualizado) {
+          console.log(`[INFO] OS ${os.id} atualizada com setor ${setorId}.`);
+        } else {
+          console.error(`[ERRO] Falha ao atualizar OS ${os.id} com setor ${setorId}.`);
+        }
+      } catch (err) {
+        console.error(`[ERRO] Exceção ao atualizar OS ${os.id} com setor ${setorId}:`, err.message);
+      }
     }
     
     console.log('Processamento de OSs abertas sem setor concluído.');

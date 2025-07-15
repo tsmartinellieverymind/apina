@@ -135,30 +135,30 @@ const PORT = process.env.PORT || 5000;
     }
     
     // Iniciar o job para atribuir setores às OS apenas se o MongoDB estiver conectado
-    // if (mongoConectado) {
-    //   try {
-    //     const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS');
+    if (mongoConectado) {
+      try {
+        const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS');
         
-    //     // Verificar se o token da API está configurado (URL pode usar fallback)
-    //     if (apiTokenConfigurado) {
-    //       const jobIniciado = iniciarJobAtribuirSetorOS();
-    //       if (jobIniciado) {
-    //         console.log('✅ Job de atribuição de setores iniciado com sucesso!');
-    //       } else {
-    //         console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
-    //         console.log('Verifique se a variável API_TOKEN está configurada corretamente no arquivo .env.');
-    //       }
-    //     } else {
-    //       console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
-    //       console.log('Verifique se a variável API_TOKEN está configurada no arquivo .env.');
-    //     }
-    //   } catch (jobError) {
-    //     console.error('❌ Erro ao iniciar job de atribuição de setores:', jobError);
-    //     console.log('O servidor continuará funcionando, mas o job de atribuição de setores não estará ativo.');
-    //   }
-    // } else {
-    //   console.log('⚠️ Servidor iniciando sem conexão com MongoDB. Algumas funcionalidades estarão indisponíveis.');
-    // }
+        // Verificar se o token da API está configurado (URL pode usar fallback)
+        if (apiTokenConfigurado) {
+          const jobIniciado = iniciarJobAtribuirSetorOS();
+          if (jobIniciado) {
+            console.log('✅ Job de atribuição de setores iniciado com sucesso!');
+          } else {
+            console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
+            console.log('Verifique se a variável API_TOKEN está configurada corretamente no arquivo .env.');
+          }
+        } else {
+          console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
+          console.log('Verifique se a variável API_TOKEN está configurada no arquivo .env.');
+        }
+      } catch (jobError) {
+        console.error('❌ Erro ao iniciar job de atribuição de setores:', jobError);
+        console.log('O servidor continuará funcionando, mas o job de atribuição de setores não estará ativo.');
+      }
+    } else {
+      console.log('⚠️ Servidor iniciando sem conexão com MongoDB. Algumas funcionalidades estarão indisponíveis.');
+    }
     
     // Iniciar o servidor independentemente da conexão com o MongoDB
     app.listen(PORT, () => {

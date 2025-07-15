@@ -230,7 +230,7 @@ Retorne SOMENTE a frase (sem JSON).
 
   try {
     const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: agent.personality },
         { role: 'user', content: prompt }
@@ -255,6 +255,10 @@ Retorne SOMENTE a frase (sem JSON).
  */
 async function interpretarDataNatural(mensagem, agentId = 'default-agent', dados = {}, promptExtra = '') {
   const agent = require('../app/engine/loader').loadAgent(agentId);
+  
+  // Verificar se o promptExtra solicita período também
+  const solicitaPeriodo = promptExtra.includes('período') || promptExtra.includes('periodo') || promptExtra.includes('manhã') || promptExtra.includes('tarde');
+  
   const prompt = `
 "${agent.nome}", sua função é ${agent.role}. Você tem a seguinte personalidade: ${agent.personality}
 
@@ -279,7 +283,7 @@ Retorne APENAS o JSON, sem mais nada.
 
   try {
     const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: agent.personality },
         { role: 'user', content: prompt }
@@ -288,7 +292,14 @@ Retorne APENAS o JSON, sem mais nada.
     });
 
     const json = JSON.parse(resposta.choices[0].message.content);
-    logPrompt('data interpretada:', json.data_interpretada);
+    logPrompt('data interpretada:', json);
+    
+    // Se o promptExtra solicita período, retornar o objeto completo
+    if (solicitaPeriodo) {
+      return json;
+    }
+    
+    // Caso contrário, retornar apenas a data para manter compatibilidade
     return json.data_interpretada;
   } catch (error) {
     logPrompt('❌ Erro ao interpretar data:', error);
@@ -298,38 +309,75 @@ Retorne APENAS o JSON, sem mais nada.
 
 async function interpretaDataePeriodo({ mensagem, agentId = 'default-agent', dados = {}, promptExtra = '' }) {
   const agent = require('../app/engine/loader').loadAgent(agentId);
+  const dataAtual = dayjs().format('YYYY-MM-DD');
+
   const prompt = `
-Você é ${agent.nome}, sua função é ${agent.role}. Você tem a seguinte personalidade: ${agent.personality}
+Você é um especialista em extrair datas e períodos (manhã/tarde) de textos em português.
 
-Seu objetivo é identificar tanto a data quanto o período do dia (manhã ou tarde) mencionados pelo usuário. O período deve ser "M" para manhã ou "T" para tarde.
+Sua tarefa é analisar a "Frase do usuário" e retornar um objeto JSON com "data_interpretada" (no formato YYYY-MM-DD) e "periodo_interpretado" ("M" para manhã, "T" para tarde).
 
-Contexto principal: ${JSON.stringify(dados)}
-Contexto extra: ${promptExtra}
+Regras:
+1.  **Data de Referência**: Hoje é ${dataAtual}. Use esta data para calcular datas relativas como "hoje", "amanhã", "próxima segunda-feira".
+2.  **Extração**: Extraia a data e o período mesmo que a frase seja uma pergunta ou contenha palavras extras (ex: "pode ser", "acho que", "talvez").
+3.  **Formato de Saída**: Retorne SEMPRE um objeto JSON. Se não encontrar uma data ou período, use o valor null. Não inclua explicações.
 
-Responda neste formato JSON:
-{
-  "data_interpretada": "YYYY-MM-DD",
-  "periodo_interpretado": "M" // manhã
-  // ou "T" para tarde
-}
+Exemplos:
+- Frase: "Pode ser hoje?"
+  Hoje: ${dataAtual}
+  Resposta JSON: { "data_interpretada": "${dataAtual}", "periodo_interpretado": null }
 
-Se não entender a data ou período, preencha com null.
+- Frase: "amanhã de tarde"
+  Hoje: ${dataAtual}
+  Resposta JSON: { "data_interpretada": "${dayjs().add(1, 'day').format('YYYY-MM-DD')}", "periodo_interpretado": "T" }
+
+- Frase: "quero marcar para o dia 25"
+  Hoje: ${dataAtual}
+  Resposta JSON: { "data_interpretada": "${dayjs().format('YYYY-MM')}-25", "periodo_interpretado": null }
+
+- Frase: "na parte da manhã"
+  Hoje: ${dataAtual}
+  Resposta JSON: { "data_interpretada": null, "periodo_interpretado": "M" }
+
+- Frase: "blz"
+  Hoje: ${dataAtual}
+  Resposta JSON: { "data_interpretada": null, "periodo_interpretado": null }
+
+---
+Contexto da conversa (pode ajudar a definir data ou período se não estiver explícito na frase):
+${JSON.stringify(dados)}
+${promptExtra}
+---
 
 Frase do usuário: "${mensagem}"
-Hoje é: ${dayjs().format('YYYY-MM-DD')}
+Hoje é: ${dataAtual}
+
+Retorne APENAS o JSON.
 `;
+
+  logPrompt('PROMPT PARA INTERPRETAR DATA E PERÍODO', prompt);
 
   try {
     const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1
+      model: 'gpt-4o-mini', // Modelo mais moderno
+      messages: [{ role: 'system', content: 'Você é um especialista em extrair datas e períodos de textos.' }, { role: 'user', content: prompt }],
+      temperature: 0.0, // Temperatura baixa para ser mais determinístico
+      response_format: { type: "json_object" },
     });
 
-    const json = JSON.parse(resposta.choices[0].message.content);
-    return json;
+    const jsonString = resposta.choices[0].message.content;
+    logPrompt('RESPOSTA JSON DA DATA', jsonString);
+    const json = JSON.parse(jsonString);
+    
+    // Validação básica do retorno
+    if (json && typeof json.data_interpretada !== 'undefined' && typeof json.periodo_interpretado !== 'undefined') {
+        return json;
+    } else {
+        console.error('Erro: JSON retornado pela IA não tem o formato esperado.', jsonString);
+        return { data_interpretada: null, periodo_interpretado: null };
+    }
+
   } catch (error) {
-    console.error('Erro ao interpretar data e hora:', error);
+    console.error('Erro ao interpretar data e período com a IA:', error);
     return {
       data_interpretada: null,
       periodo_interpretado: null
@@ -381,7 +429,7 @@ Frase do usuário: "${mensagem}"
 
   try {
     const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: `Você é um assistente que interpreta seleção de OS.${agentId ? ' Agente: ' + agentId : ''}` },
         { role: 'user',   content: prompt }
@@ -540,6 +588,86 @@ IMPORTANTE: Responda apenas com o ID do setor correspondente. Se não encontrar,
   }
 }
 
+// Busca o setor correspondente ao bairro e tipo de serviço usando apenas OpenAI
+// @param {string} bairro - Nome do bairro
+// @param {string} tipoServico - Tipo de serviço ('instalacao' ou 'manutencao')
+// @param {Array} listaBairros - Lista de bairros com seus respectivos IDs de setores (opcional)
+// @returns {Promise<Object>} - JSON estruturado {sucesso_busca, bairro, id, tipo}
+async function findSetorByBairro(bairro, tipoServico, listaBairros = []) {
+  const { OpenAI } = require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  let prompt = `
+  Você deve encontrar, na lista abaixo, o bairro cujo nome é mais parecido com o bairro "${bairro}". Siga rigorosamente estas regras:
+  
+  - O tipo de serviço é obrigatoriamente "${tipoServico}".
+  - Encontre APENAS dentre os bairros da lista fornecida.
+  - Retorne APENAS valores presentes nesta lista, sem nenhuma alteração.
+  - O campo "id" retornado DEVE ser o valor do campo "${tipoServico}" do bairro encontrado.
+  - Se não houver um bairro semelhante, retorne "sucesso_busca": false.
+  
+  Retorne exclusivamente um JSON no formato:
+  
+  {
+    "sucesso_busca": <true ou false>,
+    "bairro": "<bairro encontrado ou string vazia>",
+    "id": "<valor do campo '${tipoServico}' do bairro encontrado ou string vazia>",
+    "tipo": "${tipoServico}"
+  }
+  
+  Lista de bairros disponíveis:
+  
+  ${listaBairros.map(b => `{
+    "bairro": "${b.bairro}",
+    "instalacao": ${b.instalacao},
+    "manutencao": ${b.manutencao}
+  }`).join(',\n')}
+  
+  Se nenhum bairro similar existir, retorne exatamente:
+  
+  {
+    "sucesso_busca": false,
+    "bairro": "",
+    "id": "",
+    "tipo": "${tipoServico}"
+  }
+  `;
+  
+
+  //console.log('[findSetorByBairro][PROMPT ENVIADO AO OPENAI]:', prompt);
+
+  try {
+    const completion = await openai.chat.completions.create({
+      //model: 'gpt-4o-mini',
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'Você é um assistente que responde apenas com JSON válido.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 150
+    });
+
+    let resposta = completion.choices[0].message.content.trim();
+    resposta = resposta
+      .replace(/^```json[\s\r\n]*/i, '')
+      .replace(/^```[\s\r\n]*/i, '')
+      .replace(/```$/g, '')
+      .trim();
+
+    try {
+      return JSON.parse(resposta);
+    } catch (e) {
+      console.error('[findSetorByBairro][ERRO PARSE JSON]:', e, resposta);
+      return { sucesso_busca: false, bairro: '', id: '', tipo: tipoServico };
+    }
+
+  } catch (openaiError) {
+    console.error('[findSetorByBairro][ERRO AO CHAMAR OPENAI]:', openaiError);
+    return { sucesso_busca: false, bairro: '', id: '', tipo: tipoServico };
+  }
+}
+
+
 module.exports = {
   responderComBaseNaIntent,
   interpretarDataNatural,
@@ -548,5 +676,6 @@ module.exports = {
   interpretarEscolhaOS,
   detectarIntentComContexto,
   gerarMensagemDaIntent,
-  buscarSetorPorBairro
+  buscarSetorPorBairro,
+  findSetorByBairro
 };

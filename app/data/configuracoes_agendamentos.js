@@ -45,7 +45,16 @@ const configuracoesAgendamento = [
     dataMinimaAgendamentoDias: 1,
     dataMaximaAgendamentoDias: 10,
     tipo: 'instalacao'
-  }
+  },
+
+    // Cobrança
+    {
+      id_assunto: 15,
+      prioridade: 3,
+      dataMinimaAgendamentoDias: 1,
+      dataMaximaAgendamentoDias: 10,
+      tipo: 'instalacao'
+    }
 ];
 
 module.exports = configuracoesAgendamento;
