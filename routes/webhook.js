@@ -1607,13 +1607,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
-            if (resposta) break;
-             if (!user.osEscolhida) { // Fallback
-                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de confirmar o agendamento.';
-                 break;
-            }
-          }
+          if (!user.osEscolhida) {
             let msg = 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer qual é?';
             if (user.osList && user.osList.length > 0) {
               const abertas = user.osList.filter(os => os.status === 'A');
@@ -1635,64 +1629,79 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             resposta = msg;
             break;
           }
+        }
+          // Estratégia para determinar data/período do agendamento:
+          // 1. Usar valores atuais de user se existirem (para preservar o estado da conversa)
+          // 2. Caso contrário, tentar extrair da mensagem de confirmação atual
+          // 3. Se ainda faltar, usar valores de sugestão anterior (se houver uma sugestão pendente)
+          
+          // 1. Inicializar com os valores atuais do usuário (se existirem)
+          let dataConfirmacao = user.dataInterpretada || null;
+          let periodoConfirmacao = user.periodoAgendamento || null;
+          
+          // Log do estado inicial
+          console.log('[DEBUG] confirmar_agendamento: Estado inicial - Data:', dataConfirmacao, 'Período:', periodoConfirmacao);
+          
+          // 2. Se não temos data E período, tentar extrair da mensagem atual
+          if (!dataConfirmacao || !periodoConfirmacao) {
+            console.log('[DEBUG] confirmar_agendamento: Tentando extrair data/período da mensagem:', mensagem);
+            const interpretadoDaMensagem = await interpretaDataePeriodo({
+              mensagem,
+              agentId: 'default-agent',
+              dados: contexto,
+              promptExtra: 'Tente identificar data e/ou período para o agendamento na mensagem de confirmação.'
+            });
 
-          // 1. Definir data e período para esta tentativa de confirmação.
-          let dataConfirmacao = null;
-          let periodoConfirmacao = null;
-          console.log('[DEBUG] confirmar_agendamento: Tentando extrair data/período da mensagem atual:', mensagem);
-
-          // 2. Tentar extrair data e período da mensagem de confirmação do usuário.
-          const interpretadoDaMensagem = await interpretaDataePeriodo({
-            mensagem,
-            agentId: 'default-agent',
-            dados: contexto,
-            promptExtra: 'Tente identificar data e/ou período para o agendamento na mensagem de confirmação.'
-          });
-
-          if (interpretadoDaMensagem) {
-            if (interpretadoDaMensagem.data_interpretada && dayjs(interpretadoDaMensagem.data_interpretada).isValid()) {
-              dataConfirmacao = interpretadoDaMensagem.data_interpretada;
-              console.log('[DEBUG] confirmar_agendamento: Data extraída da mensagem de confirmação:', dataConfirmacao);
+            if (interpretadoDaMensagem) {
+              // Só atualiza valores que estejam faltando
+              if (!dataConfirmacao && interpretadoDaMensagem.data_interpretada && 
+                  dayjs(interpretadoDaMensagem.data_interpretada).isValid()) {
+                dataConfirmacao = interpretadoDaMensagem.data_interpretada;
+                console.log('[DEBUG] confirmar_agendamento: Data extraída da mensagem:', dataConfirmacao);
+              }
+              
+              if (!periodoConfirmacao && interpretadoDaMensagem.periodo_interpretado) {
+                periodoConfirmacao = interpretadoDaMensagem.periodo_interpretado;
+                console.log('[DEBUG] confirmar_agendamento: Período extraído da mensagem:', periodoConfirmacao);
+              }
             }
-            if (interpretadoDaMensagem.periodo_interpretado) {
-              periodoConfirmacao = interpretadoDaMensagem.periodo_interpretado;
-              console.log('[DEBUG] confirmar_agendamento: Período extraído da mensagem de confirmação:', periodoConfirmacao);
+            
+            // 3. Verificar se há uma sugestão pendente (apenas se ainda faltar algum dado)
+            if ((!dataConfirmacao || !periodoConfirmacao) && 
+                user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO' && 
+                user.sugestaoData && user.sugestaoPeriodo) {
+              
+              console.log('[DEBUG] confirmar_agendamento: Verificando sugestão pendente');
+              
+              if (!dataConfirmacao && user.sugestaoData && dayjs(user.sugestaoData).isValid()) {
+                dataConfirmacao = user.sugestaoData;
+                console.log('[DEBUG] confirmar_agendamento: Usando data da sugestão:', dataConfirmacao);
+              }
+              
+              if (!periodoConfirmacao && user.sugestaoPeriodo) {
+                periodoConfirmacao = user.sugestaoPeriodo;
+                console.log('[DEBUG] confirmar_agendamento: Usando período da sugestão:', periodoConfirmacao);
+              }
             }
           }
-
-          // 3. Se data ou período ainda estiverem faltando E uma sugestão foi feita anteriormente (`AGENDAMENTO_SUGESTAO`), usar a sugestão.
-          if ((!dataConfirmacao || !periodoConfirmacao) &&
-              user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO' &&
-              user.sugestaoData && user.sugestaoPeriodo) {
-            console.log('[DEBUG] confirmar_agendamento: Usando sugestão anterior pois data/período não foram totalmente extraídos da mensagem atual ou são inválidos.');
-            if (!dataConfirmacao && user.sugestaoData && dayjs(user.sugestaoData).isValid()) {
-              dataConfirmacao = user.sugestaoData;
-              console.log('[DEBUG] confirmar_agendamento: Usando user.sugestaoData:', dataConfirmacao);
-            }
-            if (!periodoConfirmacao && user.sugestaoPeriodo) {
-              periodoConfirmacao = user.sugestaoPeriodo;
-              console.log('[DEBUG] confirmar_agendamento: Usando user.sugestaoPeriodo:', periodoConfirmacao);
-            }
-          }
-
-          // Atualizar o estado do usuário com a data e período definidos para esta confirmação.
+          
+          // Atualizar o estado do usuário com os valores determinados
           user.dataInterpretada = dataConfirmacao;
           user.periodoAgendamento = periodoConfirmacao;
-          console.log(`[DEBUG] confirmar_agendamento: Data para confirmação final: ${user.dataInterpretada}, Período: ${user.periodoAgendamento}`);
-          // Agora, decide o que pedir para o usuário
-          if (!user.dataInterpretada && !user.periodoAgendamento) {
+          console.log(`[DEBUG] confirmar_agendamento: Valores finais - Data: ${dataConfirmacao}, Período: ${periodoConfirmacao}`);
+          
+          // Verificar se temos informações suficientes para prosseguir
+          if (!dataConfirmacao && !periodoConfirmacao) {
             resposta = 'Preciso que você me informe a data e o período para agendarmos.';
             break;
-          }
-          if (!user.dataInterpretada) {
+          } else if (!dataConfirmacao) {
             resposta = 'Qual data você prefere para o agendamento?';
             break;
-          }
-          if (!user.periodoAgendamento) {
-            resposta = `Para o dia ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')}, você prefere manhã ou tarde?`;
+          } else if (!periodoConfirmacao) {
+            resposta = `Para o dia ${dayjs(dataConfirmacao).format('DD/MM/YYYY')}, você prefere manhã ou tarde?`;
             break;
           }
-
+          
           // Verificar se estamos esperando confirmação ou se o usuário já confirmou
           if (!user.aguardandoConfirmacao) {
             // Se não estamos aguardando confirmação, perguntar ao usuário para confirmar
@@ -1725,14 +1734,22 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           console.log('resultado: ' + JSON.stringify(resultado));
           
           // Verificar se houve erro no agendamento
-          if (resultado?.detalhes?.type === 'error') {
+          if (resultado?.detalhes?.type === 'error' || resultado?.type === 'error') {
+            // Captura o objeto que contém a mensagem de erro (detalhes ou o próprio resultado)
+            const errorObject = resultado?.detalhes?.type === 'error' ? resultado.detalhes : resultado;
+            const errorMessage = errorObject.message || 'Erro desconhecido';
+            
+            console.error('Erro no agendamento:', errorMessage);
+            
             // Tratar erros comuns de forma amigável
-            if (resultado.detalhes.message.includes('Data de fim deve ser maior')) {
+            if (errorMessage.includes('Data de fim deve ser maior')) {
               resposta = `Ops! Tive um probleminha técnico ao agendar sua visita. Estou anotando isso e vou resolver. Por favor, tente novamente daqui a pouco ou entre em contato com nosso suporte.`;
-              console.error('Erro de data_final:', resultado.detalhes.message);
+            } else if (errorMessage.includes('colaborador selecionado não está vinculado')) {
+              resposta = `Ops! Tive um problema ao agendar: o técnico não está disponível para o tipo de serviço da sua OS. Por favor, entre em contato com o nosso atendimento para que possamos resolver isso.`;
             } else {
-              // Mensagem genérica para outros erros
-              resposta = `Desculpe, não consegui agendar sua visita neste momento. Erro: ${resultado.detalhes.message}. Por favor, tente novamente mais tarde.`;
+              // Criar uma versão limpa da mensagem de erro (removendo tags HTML)
+              const cleanError = errorMessage.replace(/<[^>]*>/g, '');
+              resposta = `Desculpe, não consegui agendar sua visita neste momento. Erro: ${cleanError}. Por favor, tente novamente mais tarde ou entre em contato com nosso suporte.`;
             }
           } else if (resultado?.mensagem && resultado.mensagem.includes('Falha')) {
             // Tratar mensagens de falha de forma amigável
@@ -1750,12 +1767,14 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           console.log('antes de agendar: LOG ESTADO ');
           /* ----------- LOG COMPLETO DO ESTADO ANTES DE RESPONDER --------- */
           logEstado({ numero, user, intent, resposta });
-          // Limpa o contexto do usuário, mantendo apenas cpf, clienteId e numero
-          Object.keys(user).forEach(key => {
-            if (!['cpf', 'clienteId', 'numero', 'nomeCliente'].includes(key)) {
-              delete user[key];
-            }
-          });
+           // Limpa o contexto do usuário, mantendo apenas cpf, clienteId, numero, nomeCliente E osEscolhida
+           // ATENÇÃO: Não limpar osEscolhida imediatamente após agendamento!
+           // Só limpe osEscolhida quando o atendimento for realmente finalizado ou o usuário pedir para trocar de OS
+           Object.keys(user).forEach(key => {
+             if (!['cpf', 'clienteId', 'numero', 'nomeCliente', 'osEscolhida'].includes(key)) {
+               delete user[key];
+             }
+           });
 
           // Recarregar a lista de OS após a limpeza do contexto
           if (user.clienteId) {
