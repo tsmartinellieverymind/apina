@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+//Utiliazdo para armazenar as conversas do chatbot
 const ConversaSchema = new mongoose.Schema({
   numero: { type: String, required: true, index: true },
   mensagem_usuario: String,

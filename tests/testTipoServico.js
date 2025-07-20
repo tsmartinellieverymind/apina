@@ -1,4 +1,4 @@
-const { gerarSugestoesDeAgendamento } = require('./services/ixcService');
+const { gerarSugestoesDeAgendamento } = require('../services/ixcService');
 
 // Função simplificada para testar o comportamento de filtragem por tipo de serviço
 async function testarFiltroTipoServico() {

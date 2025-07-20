@@ -50,7 +50,7 @@ app.use('/whatsapp-webhook', webhook);
 // Rota mock para API de agentes
 app.get('/api/agents', (req, res) => {
   res.json([
-    { id: 'default-agent', name: 'Agente Padrão' },
+    { id: 'agent_os', name: 'Agente Padrão' },
     { id: 'suporte-tecnico', name: 'Suporte Técnico' },
     { id: 'vendas', name: 'Vendas' }
   ]);
@@ -71,7 +71,7 @@ app.get('/api/agents/:id', (req, res) => {
   const agentId = req.params.id;
   res.json({
     id: agentId,
-    name: agentId === 'default-agent' ? 'Agente Padrão' : 
+    name: agentId === 'agent_os' ? 'Agente Padrão' : 
           agentId === 'suporte-tecnico' ? 'Suporte Técnico' : 'Vendas',
     config: {
       welcomeMessage: 'Olá! Como posso ajudar você hoje?',

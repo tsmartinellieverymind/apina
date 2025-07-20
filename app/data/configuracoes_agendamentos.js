@@ -20,6 +20,14 @@ const configuracoesAgendamento = [
     tipo: 'manutencao'
   },
 
+  {
+    id_assunto: 1, // 0 = configuração padrão/fallback
+    prioridade: 3,
+    dataMinimaAgendamentoDias: 1,
+    dataMaximaAgendamentoDias: 15,
+    tipo: 'manutencao'
+  },
+
   // 17 - INSTALAÇÃO COMBO(O.S) - IBIUNA
   {
     id_assunto: 17,

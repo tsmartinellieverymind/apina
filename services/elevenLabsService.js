@@ -1,3 +1,5 @@
+//Utilizado para gerar áudio a partir de texto
+
 require('dotenv').config({ path: '../.env' });
 const axios = require('axios');
 const fs = require('fs').promises;

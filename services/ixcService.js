@@ -9,8 +9,6 @@ const dayjs = require('dayjs');
 const isBetween = require('dayjs/plugin/isBetween');
 const { isDiaUtil, getProximoDiaUtil } = require('./ixcUtilsData');
 const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos.js');
-const path = require('path');
-const fs = require('fs');
 
 dayjs.extend(isBetween);
 
@@ -204,10 +202,6 @@ async function verificarDisponibilidadeData(os, opcoes = {}) {
 }
 
 async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
-    return gerarSugestoesDeAgendamentoOriginal(os, opcoes);
-}
-
-async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
   // Lógica original da API
   const { dataEspecifica, periodoEspecifico } = opcoes;
   console.log('====[ gerarSugestoesDeAgendamento ]====');
@@ -223,6 +217,8 @@ async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
     console.error(`[ERRO] Configuração de agendamento não encontrada para o assunto ID: ${idAssunto}`);
     // Retorna vazio se não encontrar config, impedindo agendamento.
     return { sugestao: null, alternativas: [] };
+  }else{
+    console.log(`[LOG] Configuração de agendamento encontrada para o assunto ID: ${idAssunto}`);
   }
 
   // Extrair dados da configuração encontrada
@@ -286,7 +282,6 @@ async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
   console.log(`Data mínima calculada: ${dataMinimaObj.format('DD/MM/YYYY')}`);
   console.log(`Data máxima calculada: ${dataMaximaObj.format('DD/MM/YYYY')}`);
 
-  const periodos = ['M', 'T']; // M = manhã, T = tarde
   const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor; // Carregar vínculos aqui (já é o resultado da função)
   
   // Carregar vínculos de técnicos com setores
@@ -344,29 +339,54 @@ async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
       });
     });
 
-    // 4. Buscar todos os técnicos ativos (id_funcao=2) na API e filtrar pelo vínculo com o setor da OS
+    // 4. Buscar todos os técnicos na API e depois filtrar pelo vínculo com o setor da OS
     const bodyTec = new URLSearchParams();
-    console.log('[4] Buscando técnicos ativos (id_funcao=2) na API...');
-    bodyTec.append('qtype', 'funcionarios.id'); // buscar todos
-    bodyTec.append('query', '0');
-    bodyTec.append('oper', '!=');
+    console.log('[4] Buscando técnicos ativos na API...');
     bodyTec.append('page', '1');
-    bodyTec.append('rp', '1000');
+    bodyTec.append('rp', '2000');
     bodyTec.append('sortname', 'funcionarios.id');
     bodyTec.append('sortorder', 'asc');
-    bodyTec.append('filter', JSON.stringify({ ativo: 'S', id_funcao: '2' }));
+    // Filtro simples apenas para ativos
+    bodyTec.append('qtype', 'ativo');
+    bodyTec.append('query', 'S');
+    bodyTec.append('oper', '=');
+    
+    // Depois filtramos por id_funcao=2 no código
     let tecnicosSetor = [];
     try {
+      console.log('[DEBUG] Parâmetros da requisição:', Object.fromEntries(bodyTec.entries()));
+      
       const respTec = await api.post('/funcionarios', bodyTec, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', ixcsoft: 'listar' }
       });
-      const tecnicosApi = Object.values(respTec.data?.registros || {});
-      //console.log('[4.1] Técnicos ativos retornados pela API:', tecnicosApi.map(t => ({id: t.id, nome: t.nome, setores: vinculos[t.id]})));
+      
+      console.log('[DEBUG] Status da resposta:', respTec.status);
+      console.log('[DEBUG] Headers da resposta:', respTec.headers);
+      console.log('[DEBUG] Estrutura da resposta:', Object.keys(respTec.data || {}));
+      
+      const registros = respTec.data?.registros || {};
+      console.log('[DEBUG] Total de registros recebidos:', Object.keys(registros).length);
+      
+      let tecnicosApi = Object.values(registros);
+      console.log('[DEBUG] Total técnicos retornados (antes de filtrar):', tecnicosApi.length);
+      
+      // Filtrar por id_funcao=2 no código
+      tecnicosApi = tecnicosApi.filter(tec => tec.id_funcao === '2');
+      console.log('[DEBUG] Total técnicos após filtrar por id_funcao=2:', tecnicosApi.length);
+      console.log('[DEBUG] Primeiros 10 técnicos (se existirem):', 
+                 tecnicosApi.slice(0, 10).map(t => ({ id: t.id, nome: t.funcionario, id_funcao: t.id_funcao })));
       
       // Usar a estrutura correta: vinculos[setor] contém os IDs dos técnicos vinculados
       const idsTecnicosVinculados = vinculos[setor] || [];
+      console.log('[DEBUG] Setor da OS:', setor);
+      console.log('[DEBUG] IDs de técnicos vinculados ao setor:', idsTecnicosVinculados);
+      
       tecnicosSetor = tecnicosApi
-        .filter(tec => idsTecnicosVinculados.includes(String(tec.id)))
+        .filter(tec => {
+          const matched = idsTecnicosVinculados.includes(String(tec.id));
+          if (matched) console.log(`[DEBUG] Técnico ${tec.id} (${tec.nome}) está vinculado ao setor ${setor}`); 
+          return matched;
+        })
         .map(tec => tec.id);
         
       console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);

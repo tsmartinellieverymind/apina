@@ -1,4 +1,5 @@
 // app/models/IntentModel.js
+//Utilizado para mapear os intents do sistema
 
 const promptMap = require('../intents/prompts');
 
@@ -18,7 +19,6 @@ class IntentModel {
     };
   }
 }
-
 // Lista de todas as Intents do sistema
 const INTENTS = [
   new IntentModel('INICIO', 'inicio', ['ALEATORIO', 'EXTRAIR_CPF']),
