@@ -109,6 +109,17 @@ async function interpretaDataePeriodo({ mensagem, agentId = 'agent_os', dados = 
 }
 
 /* ---------------------------------------------------------
+   Função utilitária para validar se user.osEscolhida existe
+--------------------------------------------------------- */
+function validarOSEscolhida(user, respostaObj, mensagemPersonalizada = null) {
+  if (!user.osEscolhida) {
+    respostaObj.resposta = mensagemPersonalizada || gerarMensagemOSNaoSelecionada(user);
+    return false;
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------
    Função para interpretar o período (manhã/tarde) da mensagem
 --------------------------------------------------------- */
 async function interpretaPeriodo(mensagem) {
@@ -858,6 +869,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           // Define a OS escolhida
           user.osEscolhida = resultado.osObj;
 
+          // Validar se a OS foi definida corretamente
+          if (!user.osEscolhida) {
+            resposta = 'Erro ao selecionar a OS. Por favor, tente novamente.';
+            break;
+          }
+
           // Verificar o status da OS selecionada
           if (user.osEscolhida.status === 'AG') {
             // OS já está agendada - perguntar se quer mais informações ou reagendar
@@ -931,8 +948,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user);
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj)) {
             break;
           }
 
@@ -1012,8 +1029,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             break;
           }
           // OS is needed for `verificarDisponibilidade` later in this case.
-          if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user);
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj)) {
             break;
           }
           // At this point, user.osEscolhida should be set.
@@ -1157,12 +1174,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             break;
           }
           // OS is needed for `verificarDisponibilidade` later.
-          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
-            if (resposta) break;
-            if (!user.osEscolhida) { // Fallback
-                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de agendar.';
-                 break;
-            }
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj, 'Por favor, me informe para qual Ordem de Serviço você gostaria de agendar.')) {
+            break;
           }
           // At this point, user.osEscolhida should be set.
 
@@ -1282,12 +1296,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!await ensureOSEscolhida(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }, mensagem, contexto, intent, user.osList)) {
-             if (resposta) break;
-             if (!user.osEscolhida) { // Fallback
-                 resposta = 'Por favor, me informe para qual Ordem de Serviço você gostaria de alterar o período.';
-                 break;
-            }
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj, 'Por favor, me informe para qual Ordem de Serviço você gostaria de alterar o período.')) {
+            break;
           }
           // The call to verificarOSEscolhida is now redundant.
           
@@ -1338,8 +1349,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user);
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj)) {
             break;
           }
 
@@ -1412,8 +1423,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user);
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj)) {
             break;
           }
           if (!!user.dataInterpretada || !!user.periodoAgendamento) {
@@ -1435,8 +1446,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user, 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer para qual ordem de serviço você gostaria de consultar a disponibilidade?');
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj, 'Ops! Parece que ainda não selecionamos uma OS. Pode me dizer para qual ordem de serviço você gostaria de consultar a disponibilidade?')) {
             break;
           }
           
@@ -1542,8 +1553,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
-          if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user);
+          const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+          if (!validarOSEscolhida(user, respostaObj)) {
             break;
           }
           // Estratégia para determinar data/período do agendamento:
@@ -1797,8 +1808,11 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               if(osEscolhida){
                 user.osEscolhida = osEscolhida;
               } 
-            } else {
-              resposta = gerarMensagemOSNaoSelecionada(user);
+            }
+            
+            // Validar novamente após tentativa de extração
+            const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
+            if (!validarOSEscolhida(user, respostaObj)) {
               break;
             }
           }
