@@ -290,9 +290,9 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
   // Corrigir campo de setor
   const setor = String(os.id_setor || os.setor_id || os.setor);
   
-  // Declarar variáveis que serão usadas em diferentes escopos
+  // Declarar variáveis que serão usadas fora do try block
   let idsTecnicosVinculados = [];
-  let tecnicosApi = [];
+  let tecnicosSetor = [];
   
   try {
     // 1. Buscar OS agendadas do mesmo setor, status 'AG', dentro do período definido
@@ -344,28 +344,33 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
       });
     });
 
-    // 4. Buscar técnicos ativos
-    console.log('[4] Buscando técnicos ativos...');
-    const bodyTec = new FormData();
-    bodyTec.append('qtype', 'funcionario');
+    // 4. Buscar todos os técnicos na API e depois filtrar pelo vínculo com o setor da OS
+    const bodyTec = new URLSearchParams();
+    console.log('[4] Buscando técnicos ativos na API...');
+    bodyTec.append('page', '1');
+    bodyTec.append('rp', '2000');
+    bodyTec.append('sortname', 'funcionarios.id');
+    bodyTec.append('sortorder', 'asc');
+    // Filtro simples apenas para ativos
+    bodyTec.append('qtype', 'ativo');
     bodyTec.append('query', 'S');
     bodyTec.append('oper', '=');
     
     try {
       console.log('[DEBUG] Parâmetros da requisição:', Object.fromEntries(bodyTec.entries()));
       
-      const respTec = await axios.post(`${IXC_BASE_URL}/webservice/v1/funcionario`, bodyTec, {
-        headers: {
-          'ixcsoft': 'listar',
-          'Authorization': `Basic ${Buffer.from(`${IXC_USER}:${IXC_PASSWORD}`).toString('base64')}`,
-          'Content-Type': 'multipart/form-data'
-        }
+      const respTec = await api.post('/funcionarios', bodyTec, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ixcsoft: 'listar' }
       });
+      
+      console.log('[DEBUG] Status da resposta:', respTec.status);
+      console.log('[DEBUG] Headers da resposta:', respTec.headers);
+      console.log('[DEBUG] Estrutura da resposta:', Object.keys(respTec.data || {}));
       
       const registros = respTec.data?.registros || {};
       console.log('[DEBUG] Total de registros recebidos:', Object.keys(registros).length);
       
-      tecnicosApi = Object.values(registros);
+      let tecnicosApi = Object.values(registros);
       console.log('[DEBUG] Total técnicos retornados (antes de filtrar):', tecnicosApi.length);
       
       // Filtrar por id_funcao=2 no código
@@ -378,6 +383,17 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
       idsTecnicosVinculados = vinculos[setor] || [];
       console.log('[DEBUG] Setor da OS:', setor);
       console.log('[DEBUG] IDs de técnicos vinculados ao setor:', idsTecnicosVinculados);
+      
+      // Filtrar técnicos que estão vinculados ao setor
+      tecnicosSetor = tecnicosApi
+        .filter(tec => {
+          const matched = idsTecnicosVinculados.includes(String(tec.id));
+          if (matched) console.log(`[DEBUG] Técnico ${tec.id} (${tec.funcionario}) está vinculado ao setor ${setor}`);
+          return matched;
+        })
+        .map(tec => tec.id);
+      
+      console.log('[DEBUG] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
         
     } catch (e) {
       console.error('Erro ao buscar técnicos ativos:', e.message);
@@ -387,7 +403,7 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
     const alternativas = [];
     const limiteAgendamentos = { M: 2, T: 3 }; // 2 pela manhã, 3 à tarde
     
-    for (const idTec of idsTecnicosVinculados) {
+    for (const idTec of tecnicosSetor) {
       console.log(`[5] Gerando períodos disponíveis para técnico ${idTec}`);
       
       // Percorrer todas as datas dentro do período definido
@@ -615,7 +631,11 @@ async function buscarOSPorClienteId(clienteId) {
     });
 
     const registros = response.data?.registros || [];
-    return registros;
+    
+    // Enriquecer OSs com descrições dos assuntos
+    const osEnriquecidas = await enriquecerOSComDescricoes(registros);
+    
+    return osEnriquecidas;
   } catch (error) {
     console.error('❌ Erro ao buscar OS por clienteId:', error);
     return [];
@@ -1076,10 +1096,92 @@ Apenas retorne o JSON, sem explicações.`;
   }
 }
 
+/**
+ * Busca descrições dos assuntos das OSs
+ * @param {Array} osIds - Array de IDs dos assuntos
+ * @returns {Object} Mapeamento de ID do assunto para descrição
+ */
+async function buscarDescricoesAssuntos(assuntoIds) {
+  try {
+    if (!assuntoIds || assuntoIds.length === 0) {
+      return {};
+    }
+
+    // Remover duplicatas
+    const idsUnicos = [...new Set(assuntoIds.filter(id => id))];
+    
+    const descricoes = {};
+    
+    // Buscar cada assunto individualmente
+    for (const assuntoId of idsUnicos) {
+      try {
+        const body = new URLSearchParams();
+        body.append('qtype', 'id');
+        body.append('query', assuntoId);
+        body.append('oper', '=');
+        body.append('page', '1');
+        body.append('rp', '1');
+        
+        const response = await api.post('/su_oss_assunto', body, {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ixcsoft: 'listar'
+          }
+        });
+        
+        if (response.data && response.data.registros && Object.keys(response.data.registros).length > 0) {
+          const assunto = Object.values(response.data.registros)[0];
+          descricoes[assuntoId] = assunto.assunto || 'Sem descrição';
+        } else {
+          descricoes[assuntoId] = 'Sem descrição';
+        }
+      } catch (error) {
+        console.error(`Erro ao buscar assunto ${assuntoId}:`, error.message);
+        descricoes[assuntoId] = 'Sem descrição';
+      }
+    }
+    
+    return descricoes;
+  } catch (error) {
+    console.error('Erro ao buscar descrições dos assuntos:', error.message);
+    return {};
+  }
+}
+
+/**
+ * Enriquece uma lista de OSs com as descrições dos assuntos
+ * @param {Array} osList - Lista de OSs
+ * @returns {Array} Lista de OSs com descrições enriquecidas
+ */
+async function enriquecerOSComDescricoes(osList) {
+  try {
+    if (!osList || osList.length === 0) {
+      return osList;
+    }
+
+    // Extrair IDs dos assuntos
+    const assuntoIds = osList.map(os => os.id_assunto).filter(id => id);
+    
+    // Buscar descrições
+    const descricoes = await buscarDescricoesAssuntos(assuntoIds);
+    
+    // Enriquecer OSs com descrições
+    return osList.map(os => ({
+      ...os,
+      descricaoAssunto: descricoes[os.id_assunto] || 'Sem descrição'
+    }));
+  } catch (error) {
+    console.error('Erro ao enriquecer OSs com descrições:', error.message);
+    return osList;
+  }
+}
+
 module.exports = {
   verificarDisponibilidade,
   verificarDisponibilidadeData,
   gerarSugestoesDeAgendamento,
+  buscarDescricoesAssuntos,
+  enriquecerOSComDescricoes,
   buscarClientePorCpf,
   formatarCpf,
   buscarOSPorClienteId,

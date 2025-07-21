@@ -24,6 +24,8 @@ const {
   atualizarOS,
   gerarSugestoesDeAgendamento,
   verificarDisponibilidadeData,
+  buscarDescricoesAssuntos,
+  enriquecerOSComDescricoes,
   // verificarDisponibilidade
 } = require('../services/ixcService');
 const {
@@ -232,7 +234,7 @@ const gerarPromptContextualizado = dados => {
   /* ---------- 1) Lista resumida das OS abertas ---------- */
   if (Array.isArray(dados.osList) && dados.osList.length) {
     const resumo = dados.osList
-      .map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`)
+      .map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`)
       .join(' / ');
     l.push(`OS abertas: ${resumo}.`);
   }
@@ -359,14 +361,14 @@ function gerarMensagemOSNaoSelecionada(user, mensagemPersonalizada = null) {
     if (abertas.length > 0) {
       msg += '\n\nOS abertas:';
       abertas.forEach(os => {
-        msg += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'}`;
+        msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'}`;
       });
     }
     
     if (agendadas.length > 0) {
       msg += '\n\nOS agendadas:';
       agendadas.forEach(os => {
-        msg += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
+        msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
       });
     }
     
@@ -542,7 +544,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             // Auto-selecionar a OS se houver apenas uma aberta
             if (osAbertas.length === 1) {
               user.osEscolhida = osAbertas[0];
-              const osInfo = `• ${user.osEscolhida.id} - ${user.osEscolhida.titulo || user.osEscolhida.mensagem || 'Sem descrição'}`;
+              const osInfo = `• ${user.osEscolhida.id} - ${user.osEscolhida.descricaoAssunto || user.osEscolhida.titulo || user.osEscolhida.mensagem || 'Sem descrição'}`;
               
               // Gerar sugestões de agendamento sempre que uma OS é selecionada
               const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
@@ -567,12 +569,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nJá selecionei essa OS para você. Podemos seguir com o agendamento?`);
               }
             } else if (osAbertas.length > 1) {
-              const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+              const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
               partes.push(`Encontrei ${osAbertas.length} OS aberta(s):\n${listaAbertas}\nSe quiser, posso te ajudar a agendar uma visita. Informe o número da OS para agendar.`);
             }
             
             if (osAgendadas.length) {
-              const listaAgendadas = osAgendadas.map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+              const listaAgendadas = osAgendadas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
               partes.push(`Você já possui ${osAgendadas.length} OS agendada(s):\n${listaAgendadas}\nDeseja ver detalhes do dia da visita? Responda com o número da OS para mais informações.`);
             }
             
@@ -658,7 +660,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             if (abertas.length > 0) {
               mensagemOS += '\n\nOS abertas para agendar:';
               abertas.forEach(os => {
-                mensagemOS += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'}`;
+                mensagemOS += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'}`;
               });
             }
             
@@ -687,7 +689,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           // Monta lista de OS disponíveis
           let osMsg = 'Nenhuma OS disponível.';
           if (user.osList && user.osList.length) {
-            osMsg = user.osList.map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+            osMsg = user.osList.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
           }
           // Monta lista de datas/horários sugeridos
           let datasMsg = 'Nenhuma sugestão disponível.';
@@ -1735,13 +1737,13 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               if (abertas.length > 0) {
                 msg += '\n\nOS abertas:';
                 abertas.forEach(os => {
-                  msg += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'}`;
+                  msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'}`;
                 });
               }
               if (agendadas.length > 0) {
                 msg += '\n\nOS agendadas:';
                 agendadas.forEach(os => {
-                  msg += `\n• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
+                  msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
                 });
               }
             }
@@ -1814,7 +1816,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
             const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = user.osEscolhida.descricaoAssunto || user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
             
             resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id} (${assunto}).\nSe preferir, tenho uma sugestão: ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}.\nSe quiser outra data ou período, é só me informar! Qual data e período você prefere?`;
           } else {
