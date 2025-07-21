@@ -639,6 +639,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
                 user.sugestaoData = sugestoes.sugestao.data;
                 user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                user.id_tecnico = sugestoes.sugestao.id_tecnico;
                 
                 // Formatar a data e o período para a mensagem
                 const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
@@ -760,6 +761,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 if (sugestoes?.sugestao) {
                   user.sugestaoData = sugestoes.sugestao.data;
                   user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                  user.id_tecnico = sugestoes.sugestao.id_tecnico;
                   
                   // Formatar a data e o período para a mensagem
                   const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
@@ -1093,6 +1095,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 
                 user.sugestaoData = sugestoes.sugestao.data;
                 user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                user.id_tecnico = sugestoes.sugestao.id_tecnico;
                 user.aguardandoConfirmacao = true;
                 user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
                 // user.etapaAtual = 'confirmar_agendamento';
@@ -1143,8 +1146,16 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
                 
                 resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Confirma o agendamento para essa data?`;
+                
+                // Gerar sugestão para obter o id_tecnico correto para a data/período escolhida
+                const sugestaoEspecifica = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                  dataEspecifica: user.dataInterpretada,
+                  periodoEspecifico: user.periodoAgendamento
+                });
+                
                 user.sugestaoData = user.dataInterpretada;
                 user.sugestaoPeriodo = user.periodoAgendamento;
+                user.id_tecnico = sugestaoEspecifica?.sugestao?.id_tecnico || null;
                 user.tipoUltimaPergunta = 'AGENDAMENTO';
                 user.aguardandoConfirmacao = true;
                 // user.etapaAtual = 'confirmar_agendamento';
@@ -1672,6 +1683,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const payload = {
            ...user.osEscolhida,
            status: 'AG',
+           id_tecnico: user.id_tecnico,
              data_agenda_final: dataAgendamento, // Formato correto: YYYY-MM-DD HH:MM:SS
             melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
           };
