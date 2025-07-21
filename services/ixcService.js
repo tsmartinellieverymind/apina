@@ -116,6 +116,51 @@ async function verificarDisponibilidade(os, opcoes = {}) {
 }
 
 /**
+ * Valida se a data solicitada não ultrapassa o SLA da OS
+ * @param {Object} os - Objeto da OS
+ * @param {Object} dataObj - Objeto dayjs da data solicitada
+ * @returns {Object|null} Retorna erro se ultrapassar SLA, null se estiver ok
+ */
+function validarSLA(os, dataObj) {
+  const idAssunto = os.id_assunto;
+  const config = configuracoesAgendamento.find(c => c.id_assunto == idAssunto);
+  
+  if (config) {
+    const diasMax = config.dataMaximaAgendamentoDias;
+    
+    // Buscar data de criação/abertura da OS (campos comuns no IXC)
+    const dataCriacao = os.data_cadastro || os.data_abertura || os.data_criacao || os.data_inicio;
+    
+    if (dataCriacao) {
+      const dataCriacaoObj = dayjs(dataCriacao);
+      if (dataCriacaoObj.isValid()) {
+        // Calcular data limite do SLA (data de criação + diasMax)
+        const dataLimiteSLA = dataCriacaoObj.add(diasMax, 'day');
+        
+        // Se hoje já passou do SLA, retornar erro
+        const hoje = dayjs();
+        if (hoje.isAfter(dataLimiteSLA)) {
+          return { 
+            disponivel: false, 
+            motivo: 'Acima do SLA - prazo máximo para agendamento já foi ultrapassado' 
+          };
+        }
+        
+        // Se a data solicitada for maior que o limite do SLA, retornar erro
+        if (dataObj.isAfter(dataLimiteSLA)) {
+          return { 
+            disponivel: false, 
+            motivo: `Acima do SLA - data limite para agendamento: ${dataLimiteSLA.format('DD/MM/YYYY')}` 
+          };
+        }
+      }
+    }
+  }
+  
+  return null; // SLA ok
+}
+
+/**
  * Verifica se uma data e período específicos estão disponíveis para agendamento
  * @param {Object} os - Objeto da OS
  * @param {Object} opcoes - Opções de verificação
@@ -137,6 +182,12 @@ async function verificarDisponibilidadeData(os, opcoes = {}) {
   // Verificar se é dia útil
   if (!isDiaUtil(dataObj)) {
     return { disponivel: false, motivo: 'Não é um dia útil' };
+  }
+  
+  // Validar SLA
+  const erroSLA = validarSLA(os, dataObj);
+  if (erroSLA) {
+    return erroSLA;
   }
   
   // Gerar sugestões de agendamento para obter técnicos disponíveis
@@ -1166,13 +1217,27 @@ async function enriquecerOSComDescricoes(osList) {
     const descricoes = await buscarDescricoesAssuntos(assuntoIds);
     
     // Enriquecer OSs com descrições
-    return osList.map(os => ({
-      ...os,
-      descricaoAssunto: descricoes[os.id_assunto] || 'Sem descrição'
-    }));
+    return osList.map(os => {
+      let descricaoFinal = descricoes[os.id_assunto];
+      
+      // Se não conseguiu buscar a descrição do assunto ou retornou 'Sem descrição',
+      // usar titulo ou mensagem como fallback
+      if (!descricaoFinal || descricaoFinal === 'Sem descrição') {
+        descricaoFinal = os.titulo || os.mensagem || 'Sem descrição';
+      }
+      
+      return {
+        ...os,
+        descricaoAssunto: descricaoFinal
+      };
+    });
   } catch (error) {
     console.error('Erro ao enriquecer OSs com descrições:', error.message);
-    return osList;
+    // Mesmo com erro, retornar OSs com fallback para titulo/mensagem
+    return osList.map(os => ({
+      ...os,
+      descricaoAssunto: os.titulo || os.mensagem || 'Sem descrição'
+    }));
   }
 }
 

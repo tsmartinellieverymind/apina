@@ -821,6 +821,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
           }
+          //limpa dados de OS selecionada e dados relacionados
+          user.osEscolhida = null;
+          user.dataInterpretada = null;
+          user.periodoAgendamento = null;
           const lista = await buscarOSPorClienteId(user.clienteId);
           const osAbertas = lista.filter(o => o.status === 'A' || o.status === 'EN');
           const osAgendadas = lista.filter(o => o.status === 'AG');
@@ -1667,6 +1671,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           // Criar o payload com os dados básicos - a função atualizarOS vai calcular as datas corretas
           const payload = {
            ...user.osEscolhida,
+           status: 'AG',
              data_agenda_final: dataAgendamento, // Formato correto: YYYY-MM-DD HH:MM:SS
             melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
           };
@@ -1838,6 +1843,40 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
           // Atualiza etapa para esperar data/período
           user.etapaAnterior = user.etapaAtual;
+          break;
+        }
+        case 'verificar_os': {
+          // Garantir que o usuário tem clienteId
+          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+            break;
+          }
+
+          // Buscar OSs atualizadas com descrições enriquecidas
+          const lista = await buscarOSPorClienteId(user.clienteId);
+          const osAbertas = lista.filter(o => o.status === 'A');
+          const osAgendadas = lista.filter(o => o.status === 'AG');
+          user.osList = lista.filter(o => ['A', 'AG', 'EN'].includes(o.status));
+
+          let partes = [];
+          
+          if (osAbertas.length > 0) {
+            const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+            partes.push(`OS abertas encontradas (${osAbertas.length}):\n${listaAbertas}\n\nGostaria de agendar alguma delas?`);
+          }
+          
+          if (osAgendadas.length > 0) {
+            const listaAgendadas = osAgendadas.map(o => {
+              const dataFormatada = o.data_agenda_final ? dayjs(o.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada';
+              return `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`;
+            }).join('\n');
+            partes.push(`OS agendada encontrada (${osAgendadas.length}):\n${listaAgendadas}\n\nGostaria de ver mais detalhes ou reagendar ela?`);
+          }
+          
+          if (osAbertas.length === 0 && osAgendadas.length === 0) {
+            resposta = 'Não encontrei ordens de serviço abertas ou agendadas para você no momento.';
+          } else {
+            resposta = partes.join('\n\n');
+          }
           break;
         }
         case 'finalizado':

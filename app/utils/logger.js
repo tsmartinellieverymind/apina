@@ -24,7 +24,7 @@ function logEstado({ numero, user, intent, resposta }) {
 
   // Exibe tabela com principais e extras
   console.table({ ...principais });
-  console.log('Extras:', extras);
+ // console.log('Extras:', extras);
   console.log('OS abertas:', (user.osList || []).map(o => o.id).join(', ') || '—');
   console.log('====================================\n');
 }
