@@ -280,7 +280,9 @@ Contexto extra: ${promptExtra}
     
 Retorne APENAS o JSON, sem mais nada.
 `;
-
+console.log('====== PROMPT INTERPRETA DATA NATURAL ======');
+console.log(prompt);
+console.log('==========================================');
   try {
     const resposta = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

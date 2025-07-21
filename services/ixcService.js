@@ -282,13 +282,18 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
   console.log(`Data mínima calculada: ${dataMinimaObj.format('DD/MM/YYYY')}`);
   console.log(`Data máxima calculada: ${dataMaximaObj.format('DD/MM/YYYY')}`);
 
-  const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor; // Carregar vínculos aqui (já é o resultado da função)
-  
-  // Carregar vínculos de técnicos com setores
-  // const vinculos = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/vinculos_tecnicos_setores.json'), 'utf8'));
+  // Carregar vínculos de técnicos com setores de forma assíncrona
+  const { vinculosTecnicoSetor } = require('./ixcConfigAgendamento');
+  const vinculos = await vinculosTecnicoSetor();
+  console.log(`[LOG] Vinculos: ${JSON.stringify(vinculos, null, 2)}`);  
 
   // Corrigir campo de setor
   const setor = String(os.id_setor || os.setor_id || os.setor);
+  
+  // Declarar variáveis que serão usadas em diferentes escopos
+  let idsTecnicosVinculados = [];
+  let tecnicosApi = [];
+  
   try {
     // 1. Buscar OS agendadas do mesmo setor, status 'AG', dentro do período definido
     const body = new URLSearchParams();
@@ -339,35 +344,28 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
       });
     });
 
-    // 4. Buscar todos os técnicos na API e depois filtrar pelo vínculo com o setor da OS
-    const bodyTec = new URLSearchParams();
-    console.log('[4] Buscando técnicos ativos na API...');
-    bodyTec.append('page', '1');
-    bodyTec.append('rp', '2000');
-    bodyTec.append('sortname', 'funcionarios.id');
-    bodyTec.append('sortorder', 'asc');
-    // Filtro simples apenas para ativos
-    bodyTec.append('qtype', 'ativo');
+    // 4. Buscar técnicos ativos
+    console.log('[4] Buscando técnicos ativos...');
+    const bodyTec = new FormData();
+    bodyTec.append('qtype', 'funcionario');
     bodyTec.append('query', 'S');
     bodyTec.append('oper', '=');
     
-    // Depois filtramos por id_funcao=2 no código
-    let tecnicosSetor = [];
     try {
       console.log('[DEBUG] Parâmetros da requisição:', Object.fromEntries(bodyTec.entries()));
       
-      const respTec = await api.post('/funcionarios', bodyTec, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ixcsoft: 'listar' }
+      const respTec = await axios.post(`${IXC_BASE_URL}/webservice/v1/funcionario`, bodyTec, {
+        headers: {
+          'ixcsoft': 'listar',
+          'Authorization': `Basic ${Buffer.from(`${IXC_USER}:${IXC_PASSWORD}`).toString('base64')}`,
+          'Content-Type': 'multipart/form-data'
+        }
       });
-      
-      console.log('[DEBUG] Status da resposta:', respTec.status);
-      console.log('[DEBUG] Headers da resposta:', respTec.headers);
-      console.log('[DEBUG] Estrutura da resposta:', Object.keys(respTec.data || {}));
       
       const registros = respTec.data?.registros || {};
       console.log('[DEBUG] Total de registros recebidos:', Object.keys(registros).length);
       
-      let tecnicosApi = Object.values(registros);
+      tecnicosApi = Object.values(registros);
       console.log('[DEBUG] Total técnicos retornados (antes de filtrar):', tecnicosApi.length);
       
       // Filtrar por id_funcao=2 no código
@@ -377,19 +375,10 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
                  tecnicosApi.slice(0, 10).map(t => ({ id: t.id, nome: t.funcionario, id_funcao: t.id_funcao })));
       
       // Usar a estrutura correta: vinculos[setor] contém os IDs dos técnicos vinculados
-      const idsTecnicosVinculados = vinculos[setor] || [];
+      idsTecnicosVinculados = vinculos[setor] || [];
       console.log('[DEBUG] Setor da OS:', setor);
       console.log('[DEBUG] IDs de técnicos vinculados ao setor:', idsTecnicosVinculados);
-      
-      tecnicosSetor = tecnicosApi
-        .filter(tec => {
-          const matched = idsTecnicosVinculados.includes(String(tec.id));
-          if (matched) console.log(`[DEBUG] Técnico ${tec.id} (${tec.nome}) está vinculado ao setor ${setor}`); 
-          return matched;
-        })
-        .map(tec => tec.id);
         
-      console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
     } catch (e) {
       console.error('Erro ao buscar técnicos ativos:', e.message);
     }
@@ -398,7 +387,7 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
     const alternativas = [];
     const limiteAgendamentos = { M: 2, T: 3 }; // 2 pela manhã, 3 à tarde
     
-    for (const idTec of tecnicosSetor) {
+    for (const idTec of idsTecnicosVinculados) {
       console.log(`[5] Gerando períodos disponíveis para técnico ${idTec}`);
       
       // Percorrer todas as datas dentro do período definido

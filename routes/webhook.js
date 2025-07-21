@@ -560,10 +560,6 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
                 const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
                 
-                // Indicar que estamos aguardando confirmação
-                user.aguardandoConfirmacao = true;
-                user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
-                
                 partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nTenho uma sugestão de agendamento: ${diaSemana}, ${dataFormatada} pela ${periodoExtenso} para sua visita de ${assunto}. Confirma esse agendamento?`);
               } else {
                 console.log(`[DEBUG] extrair_cpf: Não foram encontradas sugestões`);
@@ -885,23 +881,23 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, slaHoras, prioridade);
 
           if (!sugestoes || !sugestoes.sugestao) {
-            resposta = `Nenhum horário disponível para agendamento com os técnicos deste setor.`;
+            resposta = 'Não há horários disponíveis para agendamento no momento.';
             break;
           }
 
-          // Guarda todas as alternativas de datas disponíveis
-          user.datasDisponiveis = sugestoes.alternativas;
-          // Inicializa variável para armazenar a escolha do usuário
-          user.datasDisponivelEscolhida = null;
+          // Formatar mensagem com sugestão principal e até 3 alternativas
+          const dataSug = sugestoes.sugestao.data;
+          const periodoSug = sugestoes.sugestao.periodo;
 
-          user.sugestaoData = sugestoes.sugestao.data;
-          user.sugestaoPeriodo = sugestoes.sugestao.periodo; // Armazena o período (M/T) em vez do horário
-          user.tipoUltimaPergunta = 'AGENDAMENTO';
+          // Armazenar a sugestão principal para uso na confirmação
+          user.sugestaoData = dataSug;
+          user.sugestaoPeriodo = periodoSug;
+          user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO'; // Indica que uma sugestão foi feita
+          console.log(`[DEBUG] Sugestão principal armazenada para confirmação: Data=${user.sugestaoData}, Período=${user.sugestaoPeriodo}`);
 
-          // Formatar a data e o período para a mensagem
-          const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
-          const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
-          const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
+          const dataFormatada = dayjs(dataSug).format('DD/MM/YYYY');
+          const diaSemana = diaDaSemanaExtenso(dataSug);
+          const periodoExtenso = periodoSug === 'M' ? 'manhã' : 'tarde';
           const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
 
           // Alternativas
@@ -909,8 +905,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (sugestoes.alternativas && sugestoes.alternativas.length > 0) {
             // Agrupa alternativas por data/periodo, evita duplicidade
             const alternativasUnicas = [];
-            const seen = new Set([`${sugestoes.sugestao.data},${sugestoes.sugestao.periodo}`]); // Inicializa o Set com a sugestão principal para evitar duplicação
-            
+              
             for (const alt of sugestoes.alternativas) {
               if (!alternativasUnicas.some(a => a.data === alt.data && a.periodo === alt.periodo)) {
                 alternativasUnicas.push(alt);
@@ -926,10 +921,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             }).join('\n');
           }
 
-          resposta = `Ótimo! Tenho uma sugestão para sua visita de ${assunto}! ` +
-            `Que tal ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}?` +
-            (alternativas ? `\n\nSe preferir, também tenho:\n${alternativas}` : '') +
-            `\n\nEstá bom para você ou prefere outra opção? Se preferir, posso verificar outras datas disponíveis.`;
+          resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). ` +
+            `Está bom para você ou prefere outra opção? Se preferir, posso verificar outras datas disponíveis.`;
           break;
         }
         case 'datas_disponiveis': {
@@ -990,7 +983,6 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             
             // Agrupa alternativas por data/periodo, evita duplicidade
             const alternativasUnicas = [];
-            const seen = new Set([principalKey]); // Inicializa o Set com a sugestão principal para evitar duplicação
             
             for (const alt of sugestoes.alternativas) {
               if (!alternativasUnicas.some(a => a.data === alt.data && a.periodo === alt.periodo)) {
@@ -1008,7 +1000,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           }
 
           resposta = `Ótimo! Tenho uma sugestão para sua visita de ${assunto}! ` +
-            `Que tal ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}?` +
+            `Que tal ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}? ` +
             (alternativas ? `\n\nSe preferir, também tenho:\n${alternativas}` : '') +
             `\n\nEstá bom para você ou prefere outra opção? Se preferir, posso verificar outras datas disponíveis.`;
           break;
@@ -1149,7 +1141,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               intent: 'extrair_hora', // Mudar para intent de pedir período
               agentId: 'agent_os',
               dados: contexto,
-              promptExtra: `Ok, anotei a data ${dataFormatada}. Você prefere o período da manhã ou da tarde?`
+              promptExtra: 'Ok, anotei a data ${dataFormatada}. Você prefere o período da manhã ou da tarde?'
             });
             // user.etapaAtual = 'extrair_hora';
           } else {
@@ -1269,7 +1261,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                       user.aguardandoConfirmacao = true;
                       // user.etapaAtual = 'confirmar_agendamento';
                   } else {
-                      resposta = `Desculpe, ${motivoIndisponibilidade} e não consegui gerar uma sugestão. Gostaria de tentar outra data?`;
+                      resposta = `Desculpe, ${motivoIndisponibilidade} e não consegui gerar uma sugestão. Gostaria de tentar outra data ou período?`;
                   }
                   break; // Sair após dar a sugestão ou a mensagem de erro.
                 }
@@ -1397,22 +1389,21 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
 
             resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). ` +
               `Está bom para você ou prefere outra opção? Se preferir, posso verificar outras datas disponíveis.`;
-            break;
-          }
+          } else {
+            // Fluxo antigo se não houver OS escolhida (deve ser raro)
+            if (!user.osEscolhida || !user.dataInterpretada || !user.periodoAgendamento) {
+              resposta = await gerarMensagemDaIntent({
+                intent,
+                agentId: 'agent_os',
+                dados: contexto,
+                promptExtra: 'Faltam OS, data ou período para agendar.'
+              });
+              break;
+            }
 
-          // Fluxo antigo se não houver OS escolhida (deve ser raro)
-          if (!user.osEscolhida || !user.dataInterpretada || !user.periodoAgendamento) {
-            resposta = await gerarMensagemDaIntent({
-              intent,
-              agentId: 'agent_os',
-              dados: contexto,
-              promptExtra: 'Faltam OS, data ou período para agendar.'
-            });
-            break;
+            user.aguardandoConfirmacao = true;
+            resposta = `Confirma agendar a OS ${user.osEscolhida.id} para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`;
           }
-
-          user.aguardandoConfirmacao = true;
-          resposta = `Confirma agendar a OS ${user.osEscolhida.id} para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}?`;
           break;
         }
         case 'agendar_outra_data': {
@@ -1560,11 +1551,14 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           
           // 1. Inicializar com os valores atuais do usuário (se existirem)
           let dataConfirmacao = user.dataInterpretada || null;
+          console.log('[DEBUG] confirmar_agendamento: Data confirmada:', dataConfirmacao);
           let periodoConfirmacao = user.periodoAgendamento || null;
+          console.log('[DEBUG] confirmar_agendamento: Período confirmado:', periodoConfirmacao);
           
           // Gerar sugestões de agendamento para esta OS
           console.log('[DEBUG] confirmar_agendamento: Gerando sugestões de agendamento para a OS:', user.osEscolhida.id);
           const { sugestao, alternativas } = await gerarSugestoesDeAgendamento(user.osEscolhida);
+          console.log('[DEBUG] confirmar_agendamento: Sugestões geradas:', sugestao, alternativas);
           user.sugestoesAgendamento = { sugestao, alternativas };
           
           // Armazenar a sugestão principal para uso na confirmação (consistente com o resto do código)
@@ -1687,10 +1681,6 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               const cleanError = errorMessage.replace(/<[^>]*>/g, '');
               resposta = `Desculpe, não consegui agendar sua visita neste momento. Erro: ${cleanError}. Por favor, tente novamente mais tarde ou entre em contato com nosso suporte.`;
             }
-          } else if (resultado?.mensagem && resultado.mensagem.includes('Falha')) {
-            // Tratar mensagens de falha de forma amigável
-            resposta = `Ops! Tive um probleminha ao agendar sua visita. Por favor, tente novamente daqui a pouco ou entre em contato com nosso suporte.`;
-            console.error('Falha no agendamento:', resultado.mensagem);
           } else if (user.osEscolhida && user.dataInterpretada && user.periodoAgendamento) {
             const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
             const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
@@ -1730,9 +1720,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             } catch (error) {
               console.error('Erro ao iniciar recarga da lista de OS após agendamento:', error);
             }
+          }
           break;
         }
-      }
         case 'mais_detalhes': {
           if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
             break;
@@ -1796,13 +1786,28 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             break;
           }
           if (!user.osEscolhida) {
-            resposta = gerarMensagemOSNaoSelecionada(user);
-            break;
+            console.log('Nenhuma OS escolhida');
+            console.log('user', user);
+            console.log('mensagem do usuário:', mensagem);
+            var idOsEscolhida = await interpretarNumeroOS({ mensagem: mensagem, osList: user.osList });
+            if(idOsEscolhida){
+              const osEscolhida = user.osList.find(os => os.id == idOsEscolhida);
+              if(osEscolhida){
+                user.osEscolhida = osEscolhida;
+              } 
+            } else {
+              resposta = gerarMensagemOSNaoSelecionada(user);
+              break;
+            }
           }
-          // The call to verificarOSEscolhida is now redundant.
           
+        
           // Sugerir datas disponíveis para a OS escolhida, se possível
           const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
+          console.log('[confirmar_escolha_os] user', user); 
+          console.log('[confirmar_escolha_os] user.osEscolhida', user.osEscolhida);
+          console.log('[confirmar_escolha_os] sugestoes', sugestoes);
+          console.log('[confirmar_escolha_os] sugestoes.sugestao', sugestoes.sugestao);
           if (sugestoes && sugestoes.sugestao) {
             user.sugestaoData = sugestoes.sugestao.data;
             user.sugestaoPeriodo = sugestoes.sugestao.periodo;
