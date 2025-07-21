@@ -158,8 +158,10 @@ function getConfiguracoesAgendamentoOS(os) {
  * @returns {Object} Objeto com a estrutura: { idSetor: [idTecnico1, idTecnico2, ...] }
  * @throws {Error} Se o arquivo não for encontrado
  */
-function vinculosTecnicoSetor() {
+async function vinculosTecnicoSetor() {
   try {
+    console.log('[DEBUG] vinculosTecnicoSetor: Iniciando carregamento de vínculos de técnicos e setores');
+
     // Tentar caminhos possíveis para o arquivo
     const caminhosPossiveis = [
       path.join(__dirname, '../app/data/vinculos_setores_tecnicos.json'),
@@ -167,33 +169,65 @@ function vinculosTecnicoSetor() {
       path.join(process.cwd(), 'backend/app/data/vinculos_setores_tecnicos.json')
     ];
     
+    console.log('[DEBUG] vinculosTecnicoSetor: Tentando encontrar arquivo de vínculos em caminhos possíveis:', caminhosPossiveis);
+    
     let vinculosPath = null;
     let arquivoEncontrado = false;
     
     // Verificar cada caminho possível
     for (const caminho of caminhosPossiveis) {
+      console.log('[DEBUG] vinculosTecnicoSetor: Verificando caminho:', caminho);
       if (fs.existsSync(caminho)) {
+        console.log('[DEBUG] vinculosTecnicoSetor: Arquivo encontrado em:', caminho);
         vinculosPath = caminho;
         arquivoEncontrado = true;
-        console.log(`[INFO] Arquivo de vínculos encontrado em: ${vinculosPath}`);
         break;
+      } else {
+        console.log('[DEBUG] vinculosTecnicoSetor: Arquivo não encontrado em:', caminho);
       }
     }
     
     if (!arquivoEncontrado) {
-      throw new Error(`Arquivo de vínculos não encontrado em nenhum dos caminhos: ${caminhosPossiveis.join(', ')}`);
+      console.error('[ERROR] vinculosTecnicoSetor: Arquivo de vínculos não encontrado em nenhum dos caminhos possíveis');
+      return null;
     }
     
+    // Carregar e parsear o arquivo
+    console.log('[DEBUG] vinculosTecnicoSetor: Carregando conteúdo do arquivo:', vinculosPath);
     const conteudo = fs.readFileSync(vinculosPath, 'utf8');
-    return JSON.parse(conteudo);
+    console.log('[DEBUG] vinculosTecnicoSetor: Conteúdo do arquivo (primeiros 100 caracteres):', conteudo.substring(0, 100));
+    let vinculos;
+    try {
+      vinculos = JSON.parse(conteudo);
+      console.log('[DEBUG] vinculosTecnicoSetor: Arquivo parseado com sucesso.');
+      console.log('[DEBUG] vinculosTecnicoSetor: Tipo de dado parseado:', typeof vinculos);
+      console.log('[DEBUG] vinculosTecnicoSetor: Estrutura do dado parseado:', JSON.stringify(Object.keys(vinculos).slice(0, 5), null, 2));
+      if (Array.isArray(vinculos)) {
+        console.log('[DEBUG] vinculosTecnicoSetor: Total de vínculos (array length):', vinculos.length);
+        console.log('[DEBUG] vinculosTecnicoSetor: Primeiros 5 vínculos (ou menos):', JSON.stringify(vinculos.slice(0, 5), null, 2));
+      } else {
+        console.log('[DEBUG] vinculosTecnicoSetor: Dado parseado não é um array, convertendo para formato esperado se possível');
+        // Check if it's an object with sector IDs as keys
+        if (typeof vinculos === 'object' && vinculos !== null) {
+          console.log('[DEBUG] vinculosTecnicoSetor: Chaves do objeto (primeiras 5):', Object.keys(vinculos).slice(0, 5));
+          // If it's an object with sector IDs, return it as is
+          return vinculos;
+        } else {
+          console.error('[ERROR] vinculosTecnicoSetor: Formato de dado inesperado, não é array nem objeto utilizável');
+          return null;
+        }
+      }
+    } catch (parseError) {
+      console.error('[ERROR] vinculosTecnicoSetor: Erro ao parsear JSON:', parseError.message);
+      return null;
+    }
+    
+    return vinculos;
   } catch (error) {
-    console.error('Erro ao carregar vínculos de setores com técnicos:', error.message);
-    throw error; // Propagar o erro para que o chamador saiba que algo deu errado
+    console.error('[ERROR] vinculosTecnicoSetor: Erro ao carregar vínculos de técnicos e setores:', error.message);
+    return null;
   }
 }
-
-// Executar a função vinculosTecnicoSetor e armazenar o resultado
-const vinculosTecnicoSetorResult = vinculosTecnicoSetor();
 
 module.exports = {
   getConfiguracaoAgendamento,
@@ -201,6 +235,5 @@ module.exports = {
   getDataMaximaAgendamento,
   getPrioridadeAgendamento,
   getConfiguracoesAgendamentoOS,
-  // Exportar o resultado da função em vez da função em si
-  vinculosTecnicoSetor: vinculosTecnicoSetorResult
+  vinculosTecnicoSetor
 };

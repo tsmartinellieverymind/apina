@@ -28,7 +28,7 @@ function gerarTodasAsIntentsPrompt() {
 
 async function gerarMensagemDaIntent({
   intent,
-  agentId = 'default-agent',
+  agentId = 'agent_os',
   dados = {},
   promptExtra = ''
 }) {
@@ -78,7 +78,7 @@ Retorne SOMENTE a mensagem final para o usuário (sem JSON).
  */
 async function detectarIntentComContexto({
   mensagem,
-  agentId = 'default-agent',
+  agentId = 'agent_os',
   promptExtra = '',
   intentAnterior = '',
   mensagemAnterior = '',
@@ -151,7 +151,7 @@ Retorne APENAS o JSON:
  */
 async function gerarMensagemDaIntent({
   intent,
-  agentId = 'default-agent',
+  agentId = 'agent_os',
   dados = {},
   promptExtra = ''
 }) {
@@ -199,12 +199,12 @@ logPrompt('prompt Mensagem:', prompt);
  * Pode receber um texto extra (promptAuxiliar) para dar contexto adicional.
  *
  * @param {string} intent
- * @param {string} [agentId='default-agent']
+ * @param {string} [agentId='agent_os']
  * @param {Object} [dados={}]
  * @param {string} [promptAuxiliar='']
  * @returns {Promise<string>}
  */
-async function responderComBaseNaIntent(intent, agentId = 'default-agent', dados = {}, promptAuxiliar = '') {
+async function responderComBaseNaIntent(intent, agentId = 'agent_os', dados = {}, promptAuxiliar = '') {
   const agent = loadAgent(agentId) || { nome: 'Assistente', role: 'ajudar o usuário de forma gentil e eficaz.' };
 
   //logPrompt('🔍 Agent carregado:', agent);
@@ -253,7 +253,7 @@ Retorne SOMENTE a frase (sem JSON).
  * @param {string} mensagem
  * @returns {Promise<string|null>}
  */
-async function interpretarDataNatural(mensagem, agentId = 'default-agent', dados = {}, promptExtra = '') {
+async function interpretarDataNatural(mensagem, agentId = 'agent_os', dados = {}, promptExtra = '') {
   const agent = require('../app/engine/loader').loadAgent(agentId);
   
   // Verificar se o promptExtra solicita período também
@@ -280,7 +280,9 @@ Contexto extra: ${promptExtra}
     
 Retorne APENAS o JSON, sem mais nada.
 `;
-
+console.log('====== PROMPT INTERPRETA DATA NATURAL ======');
+console.log(prompt);
+console.log('==========================================');
   try {
     const resposta = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -307,7 +309,7 @@ Retorne APENAS o JSON, sem mais nada.
   }
 }
 
-async function interpretaDataePeriodo({ mensagem, agentId = 'default-agent', dados = {}, promptExtra = '' }) {
+async function interpretaDataePeriodo({ mensagem, agentId = 'agent_os', dados = {}, promptExtra = '' }) {
   const agent = require('../app/engine/loader').loadAgent(agentId);
   const dataAtual = dayjs().format('YYYY-MM-DD');
 
@@ -502,7 +504,7 @@ Responda APENAS o JSON pedido.
  * @param {string} tipo - Tipo de serviço ('instalacao' ou 'manutencao')
  * @returns {string|null} - ID do setor ou null se não encontrado
  */
-async function buscarSetorPorBairro(bairro, listaBairros, tipo, agentId = 'default-agent') {
+async function buscarSetorPorBairro(bairro, listaBairros, tipo, agentId = 'agent_os') {
 
   if (!bairro || !listaBairros || !tipo) {
     return null;

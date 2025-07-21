@@ -1,6 +1,6 @@
 // Função adaptadora para substituir interpretaDataePeriodo
 // Esta função usa interpretarDataNatural que já está importada
-async function adaptadorInterpretaDataPeriodo({ mensagem, agentId = 'default-agent', dados = {}, promptExtra = '' }) {
+async function adaptadorInterpretaDataPeriodo({ mensagem, agentId = 'agent_os', dados = {}, promptExtra = '' }) {
   const { interpretarDataNatural } = require('./services/openaiService');
   
   // Chama a função que já existe e está importada

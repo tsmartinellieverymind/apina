@@ -1,5 +1,5 @@
 const dayjs = require('dayjs');
-const { diaDaSemanaExtenso } = require('./app/utils/dateHelpers');
+const { diaDaSemanaExtenso } = require('../app/utils/dateHelpers');
 
 // Data a ser testada
 const dataParaTestar = '2025-06-23';

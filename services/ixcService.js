@@ -9,8 +9,6 @@ const dayjs = require('dayjs');
 const isBetween = require('dayjs/plugin/isBetween');
 const { isDiaUtil, getProximoDiaUtil } = require('./ixcUtilsData');
 const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos.js');
-const path = require('path');
-const fs = require('fs');
 
 dayjs.extend(isBetween);
 
@@ -118,6 +116,51 @@ async function verificarDisponibilidade(os, opcoes = {}) {
 }
 
 /**
+ * Valida se a data solicitada não ultrapassa o SLA da OS
+ * @param {Object} os - Objeto da OS
+ * @param {Object} dataObj - Objeto dayjs da data solicitada
+ * @returns {Object|null} Retorna erro se ultrapassar SLA, null se estiver ok
+ */
+function validarSLA(os, dataObj) {
+  const idAssunto = os.id_assunto;
+  const config = configuracoesAgendamento.find(c => c.id_assunto == idAssunto);
+  
+  if (config) {
+    const diasMax = config.dataMaximaAgendamentoDias;
+    
+    // Buscar data de criação/abertura da OS (campos comuns no IXC)
+    const dataCriacao = os.data_cadastro || os.data_abertura || os.data_criacao || os.data_inicio;
+    
+    if (dataCriacao) {
+      const dataCriacaoObj = dayjs(dataCriacao);
+      if (dataCriacaoObj.isValid()) {
+        // Calcular data limite do SLA (data de criação + diasMax)
+        const dataLimiteSLA = dataCriacaoObj.add(diasMax, 'day');
+        
+        // Se hoje já passou do SLA, retornar erro
+        const hoje = dayjs();
+        if (hoje.isAfter(dataLimiteSLA)) {
+          return { 
+            disponivel: false, 
+            motivo: 'Acima do SLA - prazo máximo para agendamento já foi ultrapassado' 
+          };
+        }
+        
+        // Se a data solicitada for maior que o limite do SLA, retornar erro
+        if (dataObj.isAfter(dataLimiteSLA)) {
+          return { 
+            disponivel: false, 
+            motivo: `Acima do SLA - data limite para agendamento: ${dataLimiteSLA.format('DD/MM/YYYY')}` 
+          };
+        }
+      }
+    }
+  }
+  
+  return null; // SLA ok
+}
+
+/**
  * Verifica se uma data e período específicos estão disponíveis para agendamento
  * @param {Object} os - Objeto da OS
  * @param {Object} opcoes - Opções de verificação
@@ -139,6 +182,12 @@ async function verificarDisponibilidadeData(os, opcoes = {}) {
   // Verificar se é dia útil
   if (!isDiaUtil(dataObj)) {
     return { disponivel: false, motivo: 'Não é um dia útil' };
+  }
+  
+  // Validar SLA
+  const erroSLA = validarSLA(os, dataObj);
+  if (erroSLA) {
+    return erroSLA;
   }
   
   // Gerar sugestões de agendamento para obter técnicos disponíveis
@@ -204,10 +253,6 @@ async function verificarDisponibilidadeData(os, opcoes = {}) {
 }
 
 async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
-    return gerarSugestoesDeAgendamentoOriginal(os, opcoes);
-}
-
-async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
   // Lógica original da API
   const { dataEspecifica, periodoEspecifico } = opcoes;
   console.log('====[ gerarSugestoesDeAgendamento ]====');
@@ -223,6 +268,8 @@ async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
     console.error(`[ERRO] Configuração de agendamento não encontrada para o assunto ID: ${idAssunto}`);
     // Retorna vazio se não encontrar config, impedindo agendamento.
     return { sugestao: null, alternativas: [] };
+  }else{
+    console.log(`[LOG] Configuração de agendamento encontrada para o assunto ID: ${idAssunto}`);
   }
 
   // Extrair dados da configuração encontrada
@@ -286,14 +333,18 @@ async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
   console.log(`Data mínima calculada: ${dataMinimaObj.format('DD/MM/YYYY')}`);
   console.log(`Data máxima calculada: ${dataMaximaObj.format('DD/MM/YYYY')}`);
 
-  const periodos = ['M', 'T']; // M = manhã, T = tarde
-  const vinculos = require('./ixcConfigAgendamento').vinculosTecnicoSetor; // Carregar vínculos aqui (já é o resultado da função)
-  
-  // Carregar vínculos de técnicos com setores
-  // const vinculos = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/vinculos_tecnicos_setores.json'), 'utf8'));
+  // Carregar vínculos de técnicos com setores de forma assíncrona
+  const { vinculosTecnicoSetor } = require('./ixcConfigAgendamento');
+  const vinculos = await vinculosTecnicoSetor();
+  console.log(`[LOG] Vinculos: ${JSON.stringify(vinculos, null, 2)}`);  
 
   // Corrigir campo de setor
   const setor = String(os.id_setor || os.setor_id || os.setor);
+  
+  // Declarar variáveis que serão usadas fora do try block
+  let idsTecnicosVinculados = [];
+  let tecnicosSetor = [];
+  
   try {
     // 1. Buscar OS agendadas do mesmo setor, status 'AG', dentro do período definido
     const body = new URLSearchParams();
@@ -344,32 +395,57 @@ async function gerarSugestoesDeAgendamentoOriginal(os, opcoes = {}) {
       });
     });
 
-    // 4. Buscar todos os técnicos ativos (id_funcao=2) na API e filtrar pelo vínculo com o setor da OS
+    // 4. Buscar todos os técnicos na API e depois filtrar pelo vínculo com o setor da OS
     const bodyTec = new URLSearchParams();
-    console.log('[4] Buscando técnicos ativos (id_funcao=2) na API...');
-    bodyTec.append('qtype', 'funcionarios.id'); // buscar todos
-    bodyTec.append('query', '0');
-    bodyTec.append('oper', '!=');
+    console.log('[4] Buscando técnicos ativos na API...');
     bodyTec.append('page', '1');
-    bodyTec.append('rp', '1000');
+    bodyTec.append('rp', '2000');
     bodyTec.append('sortname', 'funcionarios.id');
     bodyTec.append('sortorder', 'asc');
-    bodyTec.append('filter', JSON.stringify({ ativo: 'S', id_funcao: '2' }));
-    let tecnicosSetor = [];
+    // Filtro simples apenas para ativos
+    bodyTec.append('qtype', 'ativo');
+    bodyTec.append('query', 'S');
+    bodyTec.append('oper', '=');
+    
     try {
+      console.log('[DEBUG] Parâmetros da requisição:', Object.fromEntries(bodyTec.entries()));
+      
       const respTec = await api.post('/funcionarios', bodyTec, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', ixcsoft: 'listar' }
       });
-      const tecnicosApi = Object.values(respTec.data?.registros || {});
-      //console.log('[4.1] Técnicos ativos retornados pela API:', tecnicosApi.map(t => ({id: t.id, nome: t.nome, setores: vinculos[t.id]})));
+      
+      console.log('[DEBUG] Status da resposta:', respTec.status);
+      console.log('[DEBUG] Headers da resposta:', respTec.headers);
+      console.log('[DEBUG] Estrutura da resposta:', Object.keys(respTec.data || {}));
+      
+      const registros = respTec.data?.registros || {};
+      console.log('[DEBUG] Total de registros recebidos:', Object.keys(registros).length);
+      
+      let tecnicosApi = Object.values(registros);
+      console.log('[DEBUG] Total técnicos retornados (antes de filtrar):', tecnicosApi.length);
+      
+      // Filtrar por id_funcao=2 no código
+      tecnicosApi = tecnicosApi.filter(tec => tec.id_funcao === '2');
+      console.log('[DEBUG] Total técnicos após filtrar por id_funcao=2:', tecnicosApi.length);
+      console.log('[DEBUG] Primeiros 10 técnicos (se existirem):', 
+                 tecnicosApi.slice(0, 10).map(t => ({ id: t.id, nome: t.funcionario, id_funcao: t.id_funcao })));
       
       // Usar a estrutura correta: vinculos[setor] contém os IDs dos técnicos vinculados
-      const idsTecnicosVinculados = vinculos[setor] || [];
+      idsTecnicosVinculados = vinculos[setor] || [];
+      console.log('[DEBUG] Setor da OS:', setor);
+      console.log('[DEBUG] IDs de técnicos vinculados ao setor:', idsTecnicosVinculados);
+      
+      // Filtrar técnicos que estão vinculados ao setor
       tecnicosSetor = tecnicosApi
-        .filter(tec => idsTecnicosVinculados.includes(String(tec.id)))
+        .filter(tec => {
+          const matched = idsTecnicosVinculados.includes(String(tec.id));
+          if (matched) console.log(`[DEBUG] Técnico ${tec.id} (${tec.funcionario}) está vinculado ao setor ${setor}`);
+          return matched;
+        })
         .map(tec => tec.id);
+      
+      console.log('[DEBUG] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
         
-      console.log('[4.2] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
     } catch (e) {
       console.error('Erro ao buscar técnicos ativos:', e.message);
     }
@@ -606,7 +682,11 @@ async function buscarOSPorClienteId(clienteId) {
     });
 
     const registros = response.data?.registros || [];
-    return registros;
+    
+    // Enriquecer OSs com descrições dos assuntos
+    const osEnriquecidas = await enriquecerOSComDescricoes(registros);
+    
+    return osEnriquecidas;
   } catch (error) {
     console.error('❌ Erro ao buscar OS por clienteId:', error);
     return [];
@@ -1067,10 +1147,106 @@ Apenas retorne o JSON, sem explicações.`;
   }
 }
 
+/**
+ * Busca descrições dos assuntos das OSs
+ * @param {Array} osIds - Array de IDs dos assuntos
+ * @returns {Object} Mapeamento de ID do assunto para descrição
+ */
+async function buscarDescricoesAssuntos(assuntoIds) {
+  try {
+    if (!assuntoIds || assuntoIds.length === 0) {
+      return {};
+    }
+
+    // Remover duplicatas
+    const idsUnicos = [...new Set(assuntoIds.filter(id => id))];
+    
+    const descricoes = {};
+    
+    // Buscar cada assunto individualmente
+    for (const assuntoId of idsUnicos) {
+      try {
+        const body = new URLSearchParams();
+        body.append('qtype', 'id');
+        body.append('query', assuntoId);
+        body.append('oper', '=');
+        body.append('page', '1');
+        body.append('rp', '1');
+        
+        const response = await api.post('/su_oss_assunto', body, {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ixcsoft: 'listar'
+          }
+        });
+        
+        if (response.data && response.data.registros && Object.keys(response.data.registros).length > 0) {
+          const assunto = Object.values(response.data.registros)[0];
+          descricoes[assuntoId] = assunto.assunto || 'Sem descrição';
+        } else {
+          descricoes[assuntoId] = 'Sem descrição';
+        }
+      } catch (error) {
+        console.error(`Erro ao buscar assunto ${assuntoId}:`, error.message);
+        descricoes[assuntoId] = 'Sem descrição';
+      }
+    }
+    
+    return descricoes;
+  } catch (error) {
+    console.error('Erro ao buscar descrições dos assuntos:', error.message);
+    return {};
+  }
+}
+
+/**
+ * Enriquece uma lista de OSs com as descrições dos assuntos
+ * @param {Array} osList - Lista de OSs
+ * @returns {Array} Lista de OSs com descrições enriquecidas
+ */
+async function enriquecerOSComDescricoes(osList) {
+  try {
+    if (!osList || osList.length === 0) {
+      return osList;
+    }
+
+    // Extrair IDs dos assuntos
+    const assuntoIds = osList.map(os => os.id_assunto).filter(id => id);
+    
+    // Buscar descrições
+    const descricoes = await buscarDescricoesAssuntos(assuntoIds);
+    
+    // Enriquecer OSs com descrições
+    return osList.map(os => {
+      let descricaoFinal = descricoes[os.id_assunto];
+      
+      // Se não conseguiu buscar a descrição do assunto ou retornou 'Sem descrição',
+      // usar titulo ou mensagem como fallback
+      if (!descricaoFinal || descricaoFinal === 'Sem descrição') {
+        descricaoFinal = os.titulo || os.mensagem || 'Sem descrição';
+      }
+      
+      return {
+        ...os,
+        descricaoAssunto: descricaoFinal
+      };
+    });
+  } catch (error) {
+    console.error('Erro ao enriquecer OSs com descrições:', error.message);
+    // Mesmo com erro, retornar OSs com fallback para titulo/mensagem
+    return osList.map(os => ({
+      ...os,
+      descricaoAssunto: os.titulo || os.mensagem || 'Sem descrição'
+    }));
+  }
+}
+
 module.exports = {
   verificarDisponibilidade,
   verificarDisponibilidadeData,
   gerarSugestoesDeAgendamento,
+  buscarDescricoesAssuntos,
+  enriquecerOSComDescricoes,
   buscarClientePorCpf,
   formatarCpf,
   buscarOSPorClienteId,
