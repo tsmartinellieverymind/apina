@@ -1,4 +1,4 @@
-const { gerarSugestoesDeAgendamento } = require('./services/ixcService');
+const { gerarSugestoesDeAgendamento } = require('../services/ixcService');
 const dayjs = require('dayjs');
 
 async function testarIdTecnicoReal() {

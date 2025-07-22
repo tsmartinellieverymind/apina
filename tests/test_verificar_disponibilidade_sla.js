@@ -9,7 +9,7 @@ dayjs.extend(timezone);
 dayjs.extend(customParseFormat);
 
 // Importar as configurações
-const configuracoesAgendamento = require('./app/data/configuracoes_agendamentos');
+const configuracoesAgendamento = require('../app/data/configuracoes_agendamentos');
 
 // Simular a função isDiaUtil
 function isDiaUtil(dataObj) {

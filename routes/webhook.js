@@ -857,7 +857,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'escolher_os': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const resultado = await processarEscolhaOS({
@@ -1031,7 +1031,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'extrair_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // OS is needed for `verificarDisponibilidade` later in this case.
@@ -1185,7 +1185,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'extrair_hora': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // OS is needed for `verificarDisponibilidade` later.
@@ -1308,7 +1308,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'alterar_periodo': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1361,7 +1361,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'agendar_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1435,7 +1435,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'agendar_outra_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1458,7 +1458,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'consultar_disponibilidade_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1565,7 +1565,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }      
         case 'confirmar_agendamento': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1754,7 +1754,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'mais_detalhes': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           if (!user.osEscolhida) {
@@ -1812,7 +1812,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'confirmar_escolha_os': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           if (!user.osEscolhida) {
@@ -1851,7 +1851,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             
             resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id} (${assunto}).\nSe preferir, tenho uma sugestão: ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}.\nSe quiser outra data ou período, é só me informar! Qual data e período você prefere?`;
           } else {
-            resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id}. Por favor, informe a data e o período (manhã ou tarde) que você prefere, e faremos o possível para atender sua solicitação!`;
+            resposta = `No momento não encontrei datas disponíveis para agendamento da OS ${user.osEscolhida.id}.\nPor favor, tente novamente mais tarde. \n\nSe quiser, posso te ajudar a agendar uma visita. Informe o número da OS para agendar.
+            #EM FASE DE TESTE DICA PARA O OPERADOR# 
+            \n\n O Setor dessa OS é ${user.osEscolhida.setor} verifique se ela está vinculado a algum tecnico no arquivo vinculos_setores_tecnicos.json`;
+            user.osEscolhida = null;
           }
           // Atualiza etapa para esperar data/período
           user.etapaAnterior = user.etapaAtual;

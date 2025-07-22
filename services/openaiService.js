@@ -194,6 +194,7 @@ logPrompt('prompt Mensagem:', prompt);
   }
 }
 
+
 /**
  * Gera uma resposta ao usuário com base numa intent conhecida.
  * Pode receber um texto extra (promptAuxiliar) para dar contexto adicional.
@@ -496,7 +497,6 @@ Responda APENAS o JSON pedido.
   return json.posicao ?? null;
 }
 
-
 /**
  * Busca o setor correspondente ao bairro e tipo de serviço
  * @param {string} bairro - Nome do bairro
@@ -668,7 +668,6 @@ async function findSetorByBairro(bairro, tipoServico, listaBairros = []) {
     return { sucesso_busca: false, bairro: '', id: '', tipo: tipoServico };
   }
 }
-
 
 module.exports = {
   responderComBaseNaIntent,
