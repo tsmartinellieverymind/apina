@@ -12,6 +12,7 @@ const { logEstado } = require('../app/utils/logger');
 const boolSalvarConversa = false; // toggle para gravar no MongoDB
 const responderComAudio = process.env.RESPONDER_COM_AUDIO === 'true'; // true para responder com áudio, false para texto
 
+
 /* ---------------------------------------------------------
    Serviços externos
 --------------------------------------------------------- */
@@ -372,14 +373,14 @@ function gerarMensagemOSNaoSelecionada(user, mensagemPersonalizada = null) {
     if (abertas.length > 0) {
       msg += '\n\nOS abertas:';
       abertas.forEach(os => {
-        msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'}`;
+        msg += `\n• ${os.id} - ${formatarDescricaoOS(os)}`;
       });
     }
     
     if (agendadas.length > 0) {
       msg += '\n\nOS agendadas:';
       agendadas.forEach(os => {
-        msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
+        msg += `\n• ${os.id} - ${formatarDescricaoOS(os)} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
       });
     }
     
@@ -571,7 +572,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
                 const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
                 const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
-                const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                const assunto = formatarDescricaoOS(user.osEscolhida);
                 
                 partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nTenho uma sugestão de agendamento: ${diaSemana}, ${dataFormatada} pela ${periodoExtenso} para sua visita de ${assunto}. Confirma esse agendamento?`);
               } else {
@@ -639,6 +640,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
                 user.sugestaoData = sugestoes.sugestao.data;
                 user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                user.id_tecnico = sugestoes.sugestao.id_tecnico;
                 
                 // Formatar a data e o período para a mensagem
                 const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
@@ -646,7 +648,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 // Capitalizar primeira letra do dia da semana
                 const diaSemanaCapitalizado = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1);
                 const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
-                const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                const assunto = formatarDescricaoOS(user.osEscolhida);
                 
                 resposta = `Ótimo! Vamos reagendar a ${assunto}. ` +
                           `Que tal ${diaSemanaCapitalizado}, dia ${dataFormatada}, no período da ${periodoExtenso}? ` +
@@ -700,7 +702,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           // Monta lista de OS disponíveis
           let osMsg = 'Nenhuma OS disponível.';
           if (user.osList && user.osList.length) {
-            osMsg = user.osList.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+            osMsg = formatarListaOS(user.osList);
           }
           // Monta lista de datas/horários sugeridos
           let datasMsg = 'Nenhuma sugestão disponível.';
@@ -760,6 +762,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 if (sugestoes?.sugestao) {
                   user.sugestaoData = sugestoes.sugestao.data;
                   user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                  user.id_tecnico = sugestoes.sugestao.id_tecnico;
                   
                   // Formatar a data e o período para a mensagem
                   const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
@@ -767,7 +770,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                   // Capitalizar primeira letra do dia da semana
                   const diaSemanaCapitalizado = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1);
                   const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
-                  const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                  const assunto = formatarDescricaoOS(user.osEscolhida);
                   
                   resposta = `Ótimo! Vamos agendar a ${assunto}. ` +
                            `Que tal ${diaSemanaCapitalizado}, dia ${dataFormatada}, no período da ${periodoExtenso}? ` +
@@ -780,7 +783,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                   
                   if (outrasOS.length > 0) {
                     // Tem outras OS para tentar agendar
-                    const listaOS = outrasOS.map(os => `• ${os.id} - ${os.titulo || os.mensagem || 'Sem descrição'}`).join('\n');
+                    const listaOS = formatarListaOS(outrasOS);
                     resposta = `Infelizmente, não consegui encontrar horários disponíveis para agendar a OS ${user.osEscolhida.id}. ` +
                       `Isso pode ocorrer devido à falta de técnicos disponíveis para o setor desta OS.\n\n` +
                       `Você possui outras ordens de serviço que podemos tentar agendar:\n${listaOS}\n\n` +
@@ -832,7 +835,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
 
           let partes = [];
           if (osAbertas.length) {
-            const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+            const listaAbertas = formatarListaOS(osAbertas);
             const plural = osAbertas.length > 1;
             partes.push(
               `OS aberta${plural ? 's' : ''} encontrada${plural ? 's' : ''} (${osAbertas.length}):\n${listaAbertas}\n\n` +
@@ -840,7 +843,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             );
           }
           if (osAgendadas.length) {
-            const listaAgendadas = osAgendadas.map(o => `• ${o.id} - ${o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+            const listaAgendadas = formatarListaOS(osAgendadas);
             const plural = osAgendadas.length > 1;
             partes.push(
               `OS agendada${plural ? 's' : ''} encontrada${plural ? 's' : ''} (${osAgendadas.length}):\n${listaAgendadas}\n\n` +
@@ -855,7 +858,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'escolher_os': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const resultado = await processarEscolhaOS({
@@ -887,7 +890,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const periodoAgendado = user.osEscolhida.melhor_horario_agenda === 'M' ? 'manhã' : 'tarde';
             const diaSemanaAgendado = user.osEscolhida.data_agenda_final ? 
                                     diaDaSemanaExtenso(user.osEscolhida.data_agenda_final) : '';
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = formatarDescricaoOS(user.osEscolhida);
             
             resposta = `Você selecionou a OS ${user.osEscolhida.id} (${assunto}) que já está agendada para ${diaSemanaAgendado}, ` +
                       `dia ${dataAgendada}, no período da ${periodoAgendado}.\n\n` +
@@ -921,7 +924,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const dataFormatada = dayjs(dataSug).format('DD/MM/YYYY');
           const diaSemana = diaDaSemanaExtenso(dataSug);
           const periodoExtenso = periodoSug === 'M' ? 'manhã' : 'tarde';
-          const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+          const assunto = formatarDescricaoOS(user.osEscolhida);
 
           // Alternativas
           let alternativas = '';
@@ -964,7 +967,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const periodoAgendado = user.osEscolhida.melhor_horario_agenda === 'M' ? 'manhã' : 'tarde';
             const diaSemanaAgendado = user.osEscolhida.data_agenda_final ? 
               diaDaSemanaExtenso(user.osEscolhida.data_agenda_final) : '';
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = formatarDescricaoOS(user.osEscolhida);
             
             resposta = `Você selecionou a OS ${user.osEscolhida.id} (${assunto}) que já está agendada para ${diaSemanaAgendado}, ` +
                       `dia ${dataAgendada}, no período da ${periodoAgendado}.\n\n` +
@@ -996,7 +999,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const dataFormatada = dayjs(dataSug).format('DD/MM/YYYY');
           const diaSemana = diaDaSemanaExtenso(dataSug);
           const periodoExtenso = periodoSug === 'M' ? 'manhã' : 'tarde';
-          const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+          const assunto = formatarDescricaoOS(user.osEscolhida);
 
           // Alternativas
           let alternativas = '';
@@ -1029,7 +1032,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'extrair_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // OS is needed for `verificarDisponibilidade` later in this case.
@@ -1093,6 +1096,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 
                 user.sugestaoData = sugestoes.sugestao.data;
                 user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                user.id_tecnico = sugestoes.sugestao.id_tecnico;
                 user.aguardandoConfirmacao = true;
                 user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
                 // user.etapaAtual = 'confirmar_agendamento';
@@ -1140,11 +1144,19 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
                 const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
                 const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-                const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                const assunto = formatarDescricaoOS(user.osEscolhida);
                 
                 resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Confirma o agendamento para essa data?`;
+                
+                // Gerar sugestão para obter o id_tecnico correto para a data/período escolhida
+                const sugestaoEspecifica = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                  dataEspecifica: user.dataInterpretada,
+                  periodoEspecifico: user.periodoAgendamento
+                });
+                
                 user.sugestaoData = user.dataInterpretada;
                 user.sugestaoPeriodo = user.periodoAgendamento;
+                user.id_tecnico = sugestaoEspecifica?.sugestao?.id_tecnico || null;
                 user.tipoUltimaPergunta = 'AGENDAMENTO';
                 user.aguardandoConfirmacao = true;
                 // user.etapaAtual = 'confirmar_agendamento';
@@ -1174,7 +1186,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'extrair_hora': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // OS is needed for `verificarDisponibilidade` later.
@@ -1248,7 +1260,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                   const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
                   const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
                   const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-                  const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+                  const assunto = formatarDescricaoOS(user.osEscolhida);
                   
                   resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Confirma o agendamento para essa data?`;
                   user.sugestaoData = user.dataInterpretada;
@@ -1297,7 +1309,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'alterar_periodo': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1344,13 +1356,13 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
           const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
           const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-          const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+          const assunto = formatarDescricaoOS(user.osEscolhida);
           
           resposta = `Ótimo! Confirmando a alteração para ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}. Posso confirmar o agendamento?`;
           break;
         }
         case 'agendar_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1380,7 +1392,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const dataFormatada = dayjs(dataSug).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(dataSug);
             const periodoExtenso = periodoSug === 'M' ? 'manhã' : 'tarde';
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = formatarDescricaoOS(user.osEscolhida);
 
             // Alternativas
             let alternativas = '';
@@ -1424,7 +1436,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'agendar_outra_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1447,7 +1459,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'consultar_disponibilidade_data': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1554,7 +1566,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }      
         case 'confirmar_agendamento': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1655,7 +1667,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
             const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = formatarDescricaoOS(user.osEscolhida);
             
             resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Confirma o agendamento para essa data?`;
             
@@ -1672,6 +1684,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const payload = {
            ...user.osEscolhida,
            status: 'AG',
+           id_tecnico: user.id_tecnico,
              data_agenda_final: dataAgendamento, // Formato correto: YYYY-MM-DD HH:MM:SS
             melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
           };
@@ -1700,7 +1713,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               resposta = `Desculpe, não consegui agendar sua visita neste momento. Erro: ${cleanError}. Por favor, tente novamente mais tarde ou entre em contato com nosso suporte.`;
             }
           } else if (user.osEscolhida && user.dataInterpretada && user.periodoAgendamento) {
-            const assunto = user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = formatarDescricaoOS(user.osEscolhida);
             const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
             resposta = `Prontinho! Sua visita para ${assunto} está agendada! Ficou para ${diaSemana}, dia ${dataFormatada} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
@@ -1742,7 +1755,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'mais_detalhes': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           if (!user.osEscolhida) {
@@ -1751,16 +1764,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               const abertas = user.osList.filter(os => os.status === 'A');
               const agendadas = user.osList.filter(os => os.status === 'AG');
               if (abertas.length > 0) {
-                msg += '\n\nOS abertas:';
-                abertas.forEach(os => {
-                  msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'}`;
-                });
+                msg += '\n\nOS abertas:\n';
+                msg += formatarListaOS(abertas);
               }
               if (agendadas.length > 0) {
-                msg += '\n\nOS agendadas:';
-                agendadas.forEach(os => {
-                  msg += `\n• ${os.id} - ${os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição'} (para ${os.data_agenda_final ? dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada'})`;
-                });
+                msg += '\n\nOS agendadas:\n';
+                msg += formatarListaOS(agendadas, true);
               }
             }
             resposta = msg;
@@ -1778,7 +1787,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
               dataFormatada = `dia ${dia} do mês de ${mes} no período da ${periodo}`;
             }
             resposta = `Opa! Prontinho! Aqui estão os detalhes da sua OS ${os.id}:
-          • Assunto: ${os.titulo || os.mensagem || 'Sem descrição'}
+          • Assunto: ${formatarDescricaoOS(os)}
           • Status: ${os.status === 'AG' ? 'Agendada' : os.status === 'A' ? 'Aberta' : os.status}
           ${dataFormatada ? `• Data agendada: ${dataFormatada}\n` : ''}${os.endereco ? `• Endereço: ${os.endereco}\n` : ''}Se precisar de mais alguma coisa, é só me chamar! 😊`;
             
@@ -1800,7 +1809,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'confirmar_escolha_os': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           if (!user.osEscolhida) {
@@ -1835,11 +1844,14 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
             const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
-            const assunto = user.osEscolhida.descricaoAssunto || user.osEscolhida.titulo || user.osEscolhida.mensagem || `OS ${user.osEscolhida.id}`;
+            const assunto = formatarDescricaoOS(user.osEscolhida);
             
             resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id} (${assunto}).\nSe preferir, tenho uma sugestão: ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}.\nSe quiser outra data ou período, é só me informar! Qual data e período você prefere?`;
           } else {
-            resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id}. Por favor, informe a data e o período (manhã ou tarde) que você prefere, e faremos o possível para atender sua solicitação!`;
+            resposta = `No momento não encontrei datas disponíveis para agendamento da OS ${user.osEscolhida.id}.\nPor favor, tente novamente mais tarde. \n\nSe quiser, posso te ajudar a agendar uma visita. Informe o número da OS para agendar.
+            #EM FASE DE TESTE DICA PARA O OPERADOR# 
+            \n\n O Setor dessa OS é ${user.osEscolhida.setor} verifique se ela está vinculado a algum tecnico no arquivo vinculos_setores_tecnicos.json`;
+            user.osEscolhida = null;
           }
           // Atualiza etapa para esperar data/período
           user.etapaAnterior = user.etapaAtual;
@@ -1860,15 +1872,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           let partes = [];
           
           if (osAbertas.length > 0) {
-            const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+            const listaAbertas = formatarListaOS(osAbertas);
             partes.push(`OS abertas encontradas (${osAbertas.length}):\n${listaAbertas}\n\nGostaria de agendar alguma delas?`);
           }
           
           if (osAgendadas.length > 0) {
-            const listaAgendadas = osAgendadas.map(o => {
-              const dataFormatada = o.data_agenda_final ? dayjs(o.data_agenda_final).format('DD/MM/YYYY [às] HH:mm') : 'data não informada';
-              return `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`;
-            }).join('\n');
+            const listaAgendadas = formatarListaOS(osAgendadas, true);
             partes.push(`OS agendada encontrada (${osAgendadas.length}):\n${listaAgendadas}\n\nGostaria de ver mais detalhes ou reagendar ela?`);
           }
           
@@ -2018,5 +2027,33 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
     res.status(500).send('Erro interno do servidor');
   }
 });
+
+/**
+ * Formata a descrição de uma OS com fallback para diferentes campos
+ * @param {Object} os - Objeto da OS
+ * @returns {string} Descrição formatada
+ */
+function formatarDescricaoOS(os) {
+  return os.descricaoAssunto || os.titulo || os.mensagem || 'Sem descrição';
+}
+
+/**
+ * Formata uma lista de OSs para exibição
+ * @param {Array} osList - Lista de OSs
+ * @param {boolean} incluirData - Se deve incluir data de agendamento (para OSs agendadas)
+ * @returns {string} Lista formatada
+ */
+function formatarListaOS(osList, incluirData = false) {
+  return osList.map(os => {
+    let linha = `• ${os.id} - ${formatarDescricaoOS(os)}`;
+    
+    if (incluirData && os.data_agenda_final) {
+      const dataFormatada = dayjs(os.data_agenda_final).format('DD/MM/YYYY [às] HH:mm');
+      linha += ` (agendada para ${dataFormatada})`;
+    }
+    
+    return linha;
+  }).join('\n');
+}
 
 module.exports = router;

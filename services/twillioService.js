@@ -23,6 +23,14 @@ async function enviarMensagemWhatsApp(messageData) {
   try {
     // Cria a mensagem usando as propriedades do objeto messageData
     // Inclui 'to', 'from', 'body' OU 'mediaUrl'
+
+
+    console.log('messageData:', messageData);
+    console.log('messageData.from:', messageData.from);
+    console.log('messageData.to:', messageData.to);
+    console.log('messageData.body:', messageData.body);
+    console.log('messageData.mediaUrl:', messageData.mediaUrl);
+    
     const message = await client.messages.create({
       ...messageData, // Espalha as propriedades (to, from, body?, mediaUrl?)
       httpAgent: httpsAgent // Mantém o agent customizado

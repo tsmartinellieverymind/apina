@@ -184,6 +184,12 @@ async function verificarDisponibilidadeData(os, opcoes = {}) {
     return { disponivel: false, motivo: 'Não é um dia útil' };
   }
   
+  // Verificar se não é agendamento para hoje
+  const hoje = dayjs();
+  if (dataObj.isSame(hoje, 'day')) {
+    return { disponivel: false, motivo: 'Não é possível agendar para o dia atual' };
+  }
+  
   // Validar SLA
   const erroSLA = validarSLA(os, dataObj);
   if (erroSLA) {
@@ -779,8 +785,11 @@ async function buscarOSAbertaComBairro() {
     console.log('Buscando OSs abertas COM bairro preenchido...');
     
     const body = new URLSearchParams();
-    body.append('qtype', 'su_oss_chamado.status');
-    body.append('query', 'A'); // Status A = Aberto
+    // body.append('qtype', 'su_oss_chamado.status');
+    // body.append('query', 'A'); // Status A = Aberto AG = Agendada 
+    // inclui o qtype de setor
+    body.append('qtype', 'su_oss_chamado.setor');
+    body.append('query', '17'); // Status A = Aberto AG = Agendada 
     body.append('oper', '=');
     body.append('page', '1');
     body.append('rp', '100');
