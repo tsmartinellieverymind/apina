@@ -28,36 +28,36 @@ const configuracoesAgendamento = [
     tipo: 'manutencao'
   },
 
-  // 17 - INSTALAÇÃO COMBO(O.S) - IBIUNA
+  //INSTALAÇÃO COMBO(O.S) - IBIUNA
   {
-    id_assunto: 17,
+    id_assunto: 16,
     prioridade: 2, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 5,
     dataMaximaAgendamentoDias: 20,
     tipo: 'instalacao'
   },
 
-  // 18 - MUDANÇA DE ENDEREÇO (O.S)
+  //MUDANÇA DE ENDEREÇO (O.S)
   {
-    id_assunto: 18,
+    id_assunto: 17,
     prioridade: 3, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 3,
     dataMaximaAgendamentoDias: 10,
     tipo: 'instalacao'
   },
 
-  // 19 - TV REPARO (O.S)
+  //TV REPARO (O.S)
   {
-    id_assunto: 19,
+    id_assunto: 18,
     prioridade: 1, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 1,
     dataMaximaAgendamentoDias: 3,
     tipo: 'manutencao'
   },
 
-  // 20 - VISTORIA TECNICA (OS)
+  //VISTORIA TECNICA (OS)
   {
-    id_assunto: 20,
+    id_assunto: 19,
     prioridade: 2, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 3,
     dataMaximaAgendamentoDias: 10,
