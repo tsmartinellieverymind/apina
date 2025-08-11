@@ -218,6 +218,38 @@ async function ensureClienteId(user, respostaObj) {
   return true;
 }
 
+/**
+ * Trata casos onde não há sugestões de agendamento disponíveis.
+ * Verifica se o usuário tem outras OSs e oferece alternativas ou mensagem adequada.
+ * @param {Object} user - Objeto do usuário
+ * @returns {string} - Mensagem de resposta apropriada
+ */
+function tratarIndisponibilidadeAgendamento(user) {
+  // Verificar se o usuário tem outras OSs disponíveis
+  const outrasOSs = user.osList ? user.osList.filter(os => os.id !== user.osEscolhida.id && (os.status === 'A' || os.status === 'AG')) : [];
+  
+  if (outrasOSs.length > 0) {
+    // Limpar a OS atual e oferecer outras opções
+    const osAtualId = user.osEscolhida.id;
+    user.osEscolhida = null;
+    user.dataInterpretada = null;
+    user.periodoAgendamento = null;
+    user.sugestaoData = null;
+    user.sugestaoPeriodo = null;
+    
+    const listaOutrasOS = outrasOSs.map(os => {
+      const descricao = formatarDescricaoOS(os);
+      return `• ${os.id} - ${descricao}`;
+    }).join('\n');
+    
+    return `No momento não temos técnicos disponíveis para agendar a OS ${osAtualId}. ` +
+           `Porém, você tem outras opções disponíveis:\n\n${listaOutrasOS}\n\n` +
+           `Gostaria de agendar uma dessas outras OSs?`;
+  } else {
+    return 'No momento não temos técnicos disponíveis para agendar sua visita. Por favor, tente mais tarde.';
+  }
+}
+
 const usuarios = {}; // { [numeroWhatsapp]: userState }
 
 const extrairCpf = (texto = '') => {
@@ -481,6 +513,21 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
       switch (intent) {
 
         case 'extrair_cpf':{
+          // Limpar todas as variáveis de sessão quando um novo CPF é informado
+          // Isso garante que não haja dados residuais de sessões anteriores
+          user.osEscolhida = null;
+          user.dataInterpretada = null;
+          user.periodoAgendamento = null;
+          user.sugestaoData = null;
+          user.sugestaoPeriodo = null;
+          user.sugestoesAgendamento = null;
+          user.osList = null;
+          user.tipoUltimaPergunta = null;
+          user.etapaAtual = null;
+          user.etapaAnterior = null;
+          user.mensagemAnteriorCliente = null;
+          user.mensagemAnteriorGPT = null;
+          console.log('[DEBUG] extrair_cpf: Variáveis de sessão limpas para novo CPF');
           resposta = user._respostaCPF;
           const cpf = extrairCpf(mensagem);
           
@@ -577,8 +624,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nTenho uma sugestão de agendamento: ${diaSemana}, ${dataFormatada} pela ${periodoExtenso} para sua visita de ${assunto}. Confirma esse agendamento?`);
               } else {
                 console.log(`[DEBUG] extrair_cpf: Não foram encontradas sugestões`);
-                // Se não há sugestão disponível, usar mensagem padrão
-                partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nJá selecionei essa OS para você. Podemos seguir com o agendamento?`);
+                // Se não há sugestão disponível, usar a função de tratamento de indisponibilidade
+                const mensagemIndisponibilidade = tratarIndisponibilidadeAgendamento(user);
+                partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\n${mensagemIndisponibilidade}`);
               }
             } else if (osAbertas.length > 1) {
               const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
@@ -794,11 +842,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                     user.aguardandoConfirmacao = false;
                     break;
                   } else {
-                    // Não tem outras OS, encerrar o atendimento
-                    resposta = `Infelizmente, não consegui encontrar horários disponíveis para agendar a OS ${user.osEscolhida.id}. ` +
-                      `Isso pode ocorrer devido à falta de técnicos disponíveis para o setor desta OS.\n\n` +
-                      `Como você não possui outras ordens de serviço abertas, não podemos prosseguir com o agendamento no momento. ` +
-                      `Sugerimos que entre em contato novamente mais tarde ou ligue para nossa central de atendimento.`;
+                    resposta = tratarIndisponibilidadeAgendamento(user);
                     
                     // Limpar estados
                     user.osEscolhida = null;
@@ -907,7 +951,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida, slaHoras, prioridade);
 
           if (!sugestoes || !sugestoes.sugestao) {
-            resposta = 'Não há horários disponíveis para agendamento no momento.';
+            resposta = tratarIndisponibilidadeAgendamento(user);
             break;
           }
 
@@ -983,7 +1027,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           user.sugestoesAgendamento = sugestoes;
 
           if (!sugestoes || !sugestoes.sugestao) {
-            resposta = 'Não há horários disponíveis para agendamento no momento.';
+            resposta = tratarIndisponibilidadeAgendamento(user);
             break;
           }
 
@@ -1101,7 +1145,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
                 // user.etapaAtual = 'confirmar_agendamento';
               } else {
-                resposta = `Infelizmente, ${motivoIndisponibilidade}. Poderia escolher outra data ou período?`;
+                resposta = tratarIndisponibilidadeAgendamento(user);
                 user.dataInterpretada = null;
                 user.periodoAgendamento = null;
                 // user.etapaAtual = 'extrair_data';
@@ -1375,7 +1419,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             user.sugestoesAgendamento = sugestoes;
 
             if (!sugestoes || !sugestoes.sugestao) {
-              resposta = 'Não há horários disponíveis para agendamento no momento.';
+              resposta = tratarIndisponibilidadeAgendamento(user);
               break;
             }
 
@@ -1848,9 +1892,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             
             resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id} (${assunto}).\nSe preferir, tenho uma sugestão: ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}.\nSe quiser outra data ou período, é só me informar! Qual data e período você prefere?`;
           } else {
-            resposta = `No momento não encontrei datas disponíveis para agendamento da OS ${user.osEscolhida.id}.\nPor favor, tente novamente mais tarde. \n\nSe quiser, posso te ajudar a agendar uma visita. Informe o número da OS para agendar.
-            #EM FASE DE TESTE DICA PARA O OPERADOR# 
-            \n\n O Setor dessa OS é ${user.osEscolhida.setor} verifique se ela está vinculado a algum tecnico no arquivo vinculos_setores_tecnicos.json`;
+            resposta = tratarIndisponibilidadeAgendamento(user);
             user.osEscolhida = null;
           }
           // Atualiza etapa para esperar data/período
