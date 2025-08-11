@@ -4,7 +4,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const conectarMongo = require('./config/mongo'); // conexão com MongoDB
 const webhook = require('./routes/webhook');     // rota do bot
-const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS'); // job para atribuir setores às OS
+
 
 const app = express();
 
@@ -134,36 +134,8 @@ const PORT = process.env.PORT || 5000;
       console.log('⚠️ Aviso: Token da API IXC não configurado. Configure a variável API_TOKEN no arquivo .env');
     }
     
-    // Verificar se o job de atribuição de setores está habilitado
-    const jobSetorHabilitado = process.env.ENABLE_SETOR_JOB === 'true'; // Por padrão desabilitado
-    
-    // Iniciar o job para atribuir setores às OS apenas se estiver habilitado e o MongoDB estiver conectado
-    if (mongoConectado && jobSetorHabilitado) {
-      try {
-        const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS');
-        
-        // Verificar se o token da API está configurado (URL pode usar fallback)
-        if (apiTokenConfigurado) {
-          const jobIniciado = iniciarJobAtribuirSetorOS();
-          if (jobIniciado) {
-            console.log('✅ Job de atribuição de setores iniciado com sucesso!');
-          } else {
-            console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
-            console.log('Verifique se a variável API_TOKEN está configurada corretamente no arquivo .env.');
-          }
-        } else {
-          console.log('⚠️ Job de atribuição de setores não pôde ser iniciado.');
-          console.log('Verifique se a variável API_TOKEN está configurada no arquivo .env.');
-        }
-      } catch (jobError) {
-        console.error('❌ Erro ao iniciar job de atribuição de setores:', jobError);
-        console.log('O servidor continuará funcionando, mas o job de atribuição de setores não estará ativo.');
-      }
-    } else if (mongoConectado && !jobSetorHabilitado) {
-      console.log('ℹ️ Job de atribuição de setores está desabilitado (ENABLE_SETOR_JOB=false).');
-      console.log('Para habilitar, defina ENABLE_SETOR_JOB=true no arquivo .env.');
-    } else if (!mongoConectado) {
-      console.log('⚠️ Servidor iniciando sem conexão com MongoDB. Job de atribuição de setores não será iniciado.');
+    if (!mongoConectado) {
+      console.log('⚠️ Servidor iniciando sem conexão com MongoDB.');
     }
     
     // Iniciar o servidor independentemente da conexão com o MongoDB

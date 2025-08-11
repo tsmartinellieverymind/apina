@@ -453,7 +453,7 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
       console.log('[DEBUG] Técnicos ativos e vinculados ao setor:', tecnicosSetor);
         
     } catch (e) {
-      console.error('Erro ao buscar técnicos ativos:', e.message);
+      console.error('Erro ao buscar técnicos ativos:', e.message, e.stack);
     }
 
     // 5. Gerar períodos disponíveis por técnico
