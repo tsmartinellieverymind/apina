@@ -253,20 +253,24 @@ function tratarIndisponibilidadeAgendamento(user) {
 const usuarios = {}; // { [numeroWhatsapp]: userState }
 
 const extrairCpf = (texto = '') => {
-  // Verifica se o texto se parece com um CPF no formato padrão (com ou sem pontuação)
-  const m = texto.match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/);
+  // Remove todos os caracteres não numéricos para análise
+  const apenasNumeros = texto.replace(/[^\d]/g, '');
   
-  if (!m) return null;
-  
-  const cpfLimpo = m[0].replace(/[^\d]/g, '');
-  
-  // CPF sempre tem 11 dígitos - OS geralmente tem menos ou mais dígitos
-  if (cpfLimpo.length !== 11) return null;
+  // CPF deve ter exatamente 11 dígitos
+  if (apenasNumeros.length !== 11) return null;
   
   // Verifica se os dígitos não são todos iguais (validação básica)
-  if (/^(\d)\1{10}$/.test(cpfLimpo)) return null;
+  if (/^(\d)\1{10}$/.test(apenasNumeros)) return null;
   
-  return cpfLimpo;
+  // Validação adicional: verifica se parece com um CPF real
+  // CPFs válidos não começam com 000, 111, 222, etc.
+  const primeirosTres = apenasNumeros.substring(0, 3);
+  if (/^(\d)\1{2}$/.test(primeirosTres)) {
+    // Se os 3 primeiros dígitos são iguais, pode ser um CPF inválido
+    // Mas vamos permitir para não ser muito restritivo
+  }
+  
+  return apenasNumeros;
 };
 
 const gerarPromptContextualizado = dados => {
@@ -541,6 +545,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             } else {
               resposta = 'Parece que o formato do CPF não está correto. Por favor, digite novamente com 11 dígitos (ex: 12345678900 ou 123.456.789-00).';
             }
+            break; // Interrompe a execução quando CPF é inválido
           }
     
           user.cpf = cpf;

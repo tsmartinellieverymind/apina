@@ -659,6 +659,11 @@ async function buscarClientePorCpf(cpf) {
  * @returns {string} CPF formatado
  */
 function formatarCpf(cpf) {
+  // Validação de segurança para evitar erro com valores null/undefined
+  if (!cpf || typeof cpf !== 'string') {
+    return cpf;
+  }
+  
   const apenasNumeros = cpf.replace(/\D/g, '');
   return apenasNumeros.length === 11
     ? apenasNumeros.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
