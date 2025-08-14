@@ -498,7 +498,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
 
   /* -------------------- 2. Gera contexto p/ LLM ------------------- */
   const dados = geraDados(user, mensagem);
-  const contexto = gerarPromptContextualizado(dados);
+  let contexto = gerarPromptContextualizado(dados);
+  
+  // Adicionar contexto da última pergunta para melhorar detecção de intent
+  if (user.tipoUltimaPergunta === 'DETALHES_VISITA') {
+    contexto += '\n\nCONTEXTO IMPORTANTE: A última mensagem do sistema perguntou "Deseja ver detalhes do dia da visita?". Se o usuário responder afirmativamente (sim, yes, quero, gostaria, etc.), a intent deve ser "mais_detalhes".';
+  }
   let resposta = '';
 
   try {
@@ -527,6 +532,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
     const { intent } = intentResult;
 
     user.etapaAtual = intent;
+    
+    // Limpar contexto da última pergunta se foi usado para detecção de intent
+    if (user.tipoUltimaPergunta === 'DETALHES_VISITA' && intent === 'mais_detalhes') {
+      console.log('[DEBUG] Limpando tipoUltimaPergunta após detecção correta de mais_detalhes');
+      user.tipoUltimaPergunta = null;
+    }
 
     console.log("================== Nova Intent Detectada ==================")
     console.log("==================" + intent + "=============================")
@@ -659,7 +670,17 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             
             if (osAgendadas.length) {
               const listaAgendadas = osAgendadas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
-              partes.push(`Você já possui ${osAgendadas.length} OS agendada(s):\n${listaAgendadas}\nDeseja ver detalhes do dia da visita? Responda com o número da OS para mais informações.`);
+              
+              if (osAgendadas.length === 1) {
+                // Para uma única OS agendada, pergunta direta sobre detalhes
+                partes.push(`Você já possui 1 OS agendada:\n${listaAgendadas}\nDeseja ver detalhes do dia da visita?`);
+              } else {
+                // Para múltiplas OSs agendadas, pede o número da OS
+                partes.push(`Você já possui ${osAgendadas.length} OS agendada(s):\n${listaAgendadas}\nDeseja ver detalhes do dia da visita? Responda com o número da OS para mais informações.`);
+              }
+              
+              // Definir contexto da última pergunta para ajudar na detecção de intent
+              user.tipoUltimaPergunta = 'DETALHES_VISITA';
             }
             
             if (!osAbertas.length && !osAgendadas.length) {
@@ -1685,8 +1706,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (sugestao) {
             user.sugestaoData = sugestao.data;
             user.sugestaoPeriodo = sugestao.periodo;
+            user.id_tecnico = sugestao.id_tecnico; // CORRIGIDO: Armazenar ID do técnico
             user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
-            console.log(`[DEBUG] Sugestão principal armazenada para confirmação: Data=${user.sugestaoData}, Período=${user.sugestaoPeriodo}`);
+            console.log(`[DEBUG] Sugestão principal armazenada para confirmação: Data=${user.sugestaoData}, Período=${user.sugestaoPeriodo}, Técnico=${user.id_tecnico}`);
+            console.log(`[DEBUG] VERIFICANDO: user.id_tecnico após atribuição = '${user.id_tecnico}' (tipo: ${typeof user.id_tecnico})`);
           }
           
           // Log do estado inicial
@@ -1740,6 +1763,35 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           user.periodoAgendamento = periodoConfirmacao;
           console.log(`[DEBUG] confirmar_agendamento: Valores finais - Data: ${dataConfirmacao}, Período: ${periodoConfirmacao}`);
           
+          // CRÍTICO: Se o usuário forneceu data/período específica (diferente da sugestão), 
+          // precisamos gerar uma nova sugestão para obter o id_tecnico correto
+          console.log(`[DEBUG] Comparando: dataConfirmacao='${dataConfirmacao}' vs user.sugestaoData='${user.sugestaoData}'`);
+          console.log(`[DEBUG] Comparando: periodoConfirmacao='${periodoConfirmacao}' vs user.sugestaoPeriodo='${user.sugestaoPeriodo}'`);
+          
+          if (dataConfirmacao && periodoConfirmacao && 
+              (String(dataConfirmacao) !== String(user.sugestaoData) || String(periodoConfirmacao) !== String(user.sugestaoPeriodo))) {
+            console.log('[DEBUG] confirmar_agendamento: Data/período específica fornecida, gerando sugestão para obter técnico correto');
+            try {
+              const sugestaoEspecifica = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                dataEspecifica: dataConfirmacao,
+                periodoEspecifico: periodoConfirmacao
+              });
+              
+              if (sugestaoEspecifica?.sugestao?.id_tecnico) {
+                user.sugestaoData = dataConfirmacao;
+                user.sugestaoPeriodo = periodoConfirmacao;
+                user.id_tecnico = sugestaoEspecifica.sugestao.id_tecnico;
+                console.log(`[DEBUG] confirmar_agendamento: Técnico atualizado para data/período específica: ${user.id_tecnico}`);
+              } else {
+                console.log('[DEBUG] confirmar_agendamento: Não foi possível obter técnico para data/período específica');
+                user.id_tecnico = null;
+              }
+            } catch (error) {
+              console.error('[DEBUG] confirmar_agendamento: Erro ao gerar sugestão específica:', error);
+              user.id_tecnico = null;
+            }
+          }
+          
           // Verificar se temos informações suficientes para prosseguir
           if (!dataConfirmacao && !periodoConfirmacao) {
             resposta = 'Preciso que você me informe a data e o período para agendarmos.';
@@ -1772,6 +1824,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const dataAgendamento = `${user.dataInterpretada} ${horarioPadrao}`; // Formato: YYYY-MM-DD HH:MM:SS
           
           // Criar o payload com os dados básicos - a função atualizarOS vai calcular as datas corretas
+          console.log(`[DEBUG] CRÍTICO: user.id_tecnico antes do payload = '${user.id_tecnico}' (tipo: ${typeof user.id_tecnico})`);
           const payload = {
            ...user.osEscolhida,
            status: 'AG',

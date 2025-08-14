@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const conectarMongo = require('./config/mongo'); // conexão com MongoDB
 const webhook = require('./routes/webhook');     // rota do bot
+const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS'); // job de atribuição de setores
 
 
 const app = express();
@@ -136,6 +137,20 @@ const PORT = process.env.PORT || 5000;
     
     if (!mongoConectado) {
       console.log('⚠️ Servidor iniciando sem conexão com MongoDB.');
+    }
+    
+    // Verificar se o job de atribuição de setores deve ser iniciado
+    if (process.env.ENABLE_SETOR_JOB === 'true') {
+      console.log('🔄 Iniciando job de atribuição de setores às OS...');
+      const jobIniciado = iniciarJobAtribuirSetorOS();
+      if (jobIniciado) {
+        console.log('✅ Job de atribuição de setores iniciado com sucesso.');
+      } else {
+        console.log('❌ Falha ao iniciar job de atribuição de setores.');
+      }
+    } else {
+      console.log('ℹ️ Job de atribuição de setores está desabilitado (ENABLE_SETOR_JOB=false).');
+      console.log('Para habilitar, defina ENABLE_SETOR_JOB=true no arquivo .env.');
     }
     
     // Iniciar o servidor independentemente da conexão com o MongoDB

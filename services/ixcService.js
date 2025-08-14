@@ -794,7 +794,7 @@ async function buscarOSAbertaComBairro() {
     // body.append('query', 'A'); // Status A = Aberto AG = Agendada 
     // inclui o qtype de setor
     body.append('qtype', 'su_oss_chamado.setor');
-    body.append('query', '17'); // Status A = Aberto AG = Agendada 
+    body.append('query', '13'); // Status A = Aberto AG = Agendada 
     body.append('oper', '=');
     body.append('page', '1');
     body.append('rp', '100');
