@@ -30,7 +30,7 @@ const configuracoesAgendamento = [
 
   //INSTALAÇÃO COMBO(O.S) - IBIUNA
   {
-    id_assunto: 16,
+    id_assunto: 18,
     prioridade: 2, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 5,
     dataMaximaAgendamentoDias: 20,
@@ -39,7 +39,7 @@ const configuracoesAgendamento = [
 
   //MUDANÇA DE ENDEREÇO (O.S)
   {
-    id_assunto: 17,
+    id_assunto: 19,
     prioridade: 3, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 3,
     dataMaximaAgendamentoDias: 10,
@@ -48,7 +48,7 @@ const configuracoesAgendamento = [
 
   //TV REPARO (O.S)
   {
-    id_assunto: 18,
+    id_assunto: 20,
     prioridade: 1, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 1,
     dataMaximaAgendamentoDias: 3,
@@ -57,7 +57,7 @@ const configuracoesAgendamento = [
 
   //VISTORIA TECNICA (OS)
   {
-    id_assunto: 19,
+    id_assunto: 21,
     prioridade: 2, // prioridade ajustada automaticamente
     dataMinimaAgendamentoDias: 3,
     dataMaximaAgendamentoDias: 10,
