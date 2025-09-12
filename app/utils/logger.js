@@ -9,7 +9,7 @@ function logEstado({ numero, user, intent, resposta }) {
     cpf: user.cpf,
     clienteId: user.clienteId,
     nomeCliente: user.nomeCliente,
-    osEscolhida: user.osEscolhida?.id || null,
+    //osEscolhida: user.osEscolhida?.id || null,
     dataInterpretada: user.dataInterpretada,
     periodo: user.periodoAgendamento // Usando a propriedade correta periodoAgendamento
   };

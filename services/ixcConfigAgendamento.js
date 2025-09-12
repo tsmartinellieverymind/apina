@@ -229,11 +229,106 @@ async function vinculosTecnicoSetor() {
   }
 }
 
+/**
+ * Carrega os limites de instalação por setor
+ * @returns {Object} Objeto com configurações de limite por setor
+ */
+async function carregarLimitesInstalacaoPorSetor() {
+  try {
+    console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Iniciando carregamento de limites por setor');
+    
+    const caminhosPossiveis = [
+      path.join(__dirname, '../app/data/limites_instalacao_por_setor.json'),
+      path.join(process.cwd(), 'app/data/limites_instalacao_por_setor.json'),
+      path.join(process.cwd(), 'backend/app/data/limites_instalacao_por_setor.json')
+    ];
+    
+    console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Tentando encontrar arquivo em caminhos possíveis:', caminhosPossiveis);
+    
+    let limitesPath = null;
+    for (const caminho of caminhosPossiveis) {
+      console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Verificando caminho:', caminho);
+      if (fs.existsSync(caminho)) {
+        console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Arquivo encontrado em:', caminho);
+        limitesPath = caminho;
+        break;
+      } else {
+        console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Arquivo não encontrado em:', caminho);
+      }
+    }
+    
+    if (!limitesPath) {
+      console.error('[ERROR] carregarLimitesInstalacaoPorSetor: Arquivo de limites não encontrado em nenhum dos caminhos possíveis');
+      return {};
+    }
+    
+    console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Carregando conteúdo do arquivo:', limitesPath);
+    const conteudo = fs.readFileSync(limitesPath, 'utf8');
+    console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Conteúdo do arquivo (primeiros 100 caracteres):', conteudo.substring(0, 100));
+    
+    try {
+      const limites = JSON.parse(conteudo);
+      console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Arquivo parseado com sucesso.');
+      console.log('[DEBUG] carregarLimitesInstalacaoPorSetor: Setores configurados:', Object.keys(limites));
+      return limites;
+    } catch (parseError) {
+      console.error('[ERROR] carregarLimitesInstalacaoPorSetor: Erro ao parsear JSON:', parseError.message);
+      return {};
+    }
+    
+  } catch (error) {
+    console.error('[ERROR] carregarLimitesInstalacaoPorSetor: Erro ao carregar limites por setor:', error.message);
+    return {};
+  }
+}
+
+/**
+ * Obtém os limites de agendamento para um setor específico
+ * @param {string|number} setor - ID do setor
+ * @returns {Object} Limites de agendamento para o setor
+ */
+async function obterLimitesAgendamentoPorSetor(setor) {
+  try {
+    const limites = await carregarLimitesInstalacaoPorSetor();
+    const setorStr = String(setor);
+    
+    if (limites[setorStr]) {
+      console.log(`[DEBUG] obterLimitesAgendamentoPorSetor: Configuração encontrada para setor ${setor}:`, limites[setorStr]);
+      return limites[setorStr];
+    }
+    
+    // Fallback para configuração padrão (manutenção)
+    console.log(`[DEBUG] obterLimitesAgendamentoPorSetor: Setor ${setor} não encontrado, usando configuração padrão`);
+    return {
+      tipo: "manutencao",
+      limite_instalacao_dia: 0,
+      limite_manutencao: {
+        M: 2,
+        T: 3
+      }
+    };
+    
+  } catch (error) {
+    console.error('[ERROR] obterLimitesAgendamentoPorSetor: Erro ao obter limites:', error.message);
+    // Fallback seguro
+    return {
+      tipo: "manutencao", 
+      limite_instalacao_dia: 0,
+      limite_manutencao: {
+        M: 2,
+        T: 3
+      }
+    };
+  }
+}
+
 module.exports = {
   getConfiguracaoAgendamento,
   getDataMinimaAgendamento,
   getDataMaximaAgendamento,
   getPrioridadeAgendamento,
   getConfiguracoesAgendamentoOS,
-  vinculosTecnicoSetor
+  vinculosTecnicoSetor,
+  carregarLimitesInstalacaoPorSetor,
+  obterLimitesAgendamentoPorSetor
 };

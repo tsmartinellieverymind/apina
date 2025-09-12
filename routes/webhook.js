@@ -1997,8 +1997,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
           console.log('[confirmar_escolha_os] user', user); 
           console.log('[confirmar_escolha_os] user.osEscolhida', user.osEscolhida);
-          console.log('[confirmar_escolha_os] sugestoes', sugestoes);
-          console.log('[confirmar_escolha_os] sugestoes.sugestao', sugestoes.sugestao);
+          //console.log('[confirmar_escolha_os] sugestoes', sugestoes);
+          //console.log('[confirmar_escolha_os] sugestoes.sugestao', sugestoes.sugestao);
           if (sugestoes && sugestoes.sugestao && sugestoes.sugestao.data && sugestoes.sugestao.periodo) {
             user.sugestaoData = sugestoes.sugestao.data;
             user.sugestaoPeriodo = sugestoes.sugestao.periodo;
