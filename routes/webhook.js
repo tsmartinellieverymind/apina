@@ -452,7 +452,7 @@ const { isDuplicateKey, normalizeBodyForDedup, hashString } = require('../servic
 
 // In-memory inbound dedup per process (avoids suppressing first delivery after restart)
 const inboundSeen = new Map(); // id -> ts
-const INBOUND_TTL_MS = 15 * 1000;      // 15s
+const INBOUND_TTL_MS = 5 * 1000;       // 5s
 const OUTBOUND_TTL_MS = 15 * 1000;     // 15s
 const SENDER_COOLDOWN_MS = 800;        // 800ms
 const RESPOND_ONCE_TTL_MS = 30 * 1000; // 30s

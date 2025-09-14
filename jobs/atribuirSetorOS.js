@@ -243,9 +243,15 @@ function iniciarJobAtribuirSetorOS() {
   // Executar imediatamente ao iniciar
   processarOSAbertas();
   
-  // Agendar para executar a cada 30 minutos
-  cron.schedule('*/30 * * * *', () => {
-    console.log('Executando job agendado de atribuição de setores...');
+  // Obter o intervalo do job a partir das variáveis de ambiente, com 30 minutos como padrão
+  const intervaloMinutos = process.env.JOB_INTERVALO_MINUTOS || 30;
+  const cronSchedule = `*/${intervaloMinutos} * * * *`;
+
+  console.log(`Agendando job para executar a cada ${intervaloMinutos} minutos...`);
+
+  // Agendar para executar no intervalo configurado
+  cron.schedule(cronSchedule, () => {
+    console.log(`Executando job agendado de atribuição de setores (a cada ${intervaloMinutos} minutos)...`);
     processarOSAbertas();
   });
   
