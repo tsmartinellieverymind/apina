@@ -46,7 +46,7 @@ const intentsOtimizado = {
 
   verificar_os: {
     "intent": "verificar_os",
-    "descricao": "Ativa quando o usuário solicita informações sobre o status, andamento ou agendamento de uma ordem de serviço (OS). Reconhece perguntas sobre prazos, datas e visitas técnicas.Ativa quando o usuário solicita visualizar novamente as opções disponíveis, seja de ordens de serviço ou datas para agendamento. Reconhece pedidos de repetição ou listagem de alternativas.",
+    "descricao": "Ativa quando o usuário solicita informações sobre o status, andamento ou agendamento de uma ordem de serviço (OS). ",
     "exemplos_usuario": [
       "qual o status da minha OS?",
       "quando o técnico vai vir?",
@@ -238,7 +238,7 @@ const intentsOtimizado = {
 
   mudar_de_os: {
     "intent": "mudar_de_os",
-    "descricao": "Ativa quando o usuário deseja trocar a OS selecionada por outra durante o processo de agendamento. Reconhece solicitações de alteração da ordem de serviço em análise.",
+    "descricao": "Ativa quando o usuário deseja reagendar a OS atual ou trocar para outra. Reconhece termos como 'reagendar', 'quero outra data', 'mudar OS'.",
     "exemplos_usuario": [
       "não quero essa, quero a outra OS",
       "quero reagendar outra OS",

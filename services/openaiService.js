@@ -40,18 +40,25 @@ async function gerarMensagemDaIntent({
     : '';
 
   const prompt = `
-Você é ${agent.nome}, sua função é ${agent.role}. Você tem a seguinte personalidade: ${agent.personality}
+Você é ${agent.nome}, ${agent.role}. Sua personalidade é: ${agent.personality}.
 
-${intent === 'aleatorio' 
-  ? 'Faça um small talk com a mensagem recebida (veja em "Contexto extra") e retome o assunto anterior.' 
-  : `Sua missão é ajudar o usuário com base na intenção atual: "${intent}".`}
+### Estilo de Comunicação:
+1.  **Clareza e Concisão**: Seja direto. Evite repetir informações que o usuário já sabe. Se uma data foi sugerida, apenas peça a confirmação de forma simples.
+2.  **Humanização**: Use expressões naturais como "Perfeito!", "Ótimo!", "Entendi 👍". Varie as respostas para não soar robótico.
+3.  **Memória**: Se o usuário já deu uma informação (CPF, OS), não peça de novo. Use o contexto para guiar a conversa.
 
-Contexto principal: ${JSON.stringify(dados)}
-Contexto extra: ${promptExtra}
+### Missão Atual:
+Sua tarefa é responder ao usuário com base na intenção detectada: **${intent}**.
 
-${sugestoesDeRespostas}
+### Contexto da Conversa:
+${JSON.stringify(dados)}
 
-Retorne SOMENTE a mensagem final para o usuário (sem JSON).
+### Informação Adicional:
+${promptExtra}
+
+${sugestoesDeRespostas ? `### Exemplos de Respostas Possíveis:\n${sugestoesDeRespostas}` : ''}
+
+Retorne APENAS a mensagem final para o usuário, sem saudações repetidas e sem formatação JSON.
 `;
 
   logPrompt('prompt Mensagem:', prompt);
@@ -102,6 +109,9 @@ Sua função é analisar a mensagem do cliente e detectar qual a intenção dele
    - Se foi sobre **escolha de OS**, e a resposta é de aceitação → **confirmar_escolha_os**.
 7. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
 8. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
+9. Se a última pergunta foi uma lista numerada (1. Ver detalhes, 2. Reagendar) e o usuário responde com um número:
+   - Se responder "1" → **mais_detalhes**.
+   - Se responder "2" → **mudar_de_os**.
 
 ### Exemplos de Classificação Correta:
 - "pode ser" (sem mencionar data/hora) → **confirmar_agendamento**
