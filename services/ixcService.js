@@ -1179,41 +1179,39 @@ async function atualizarOSComSetor(osCompleta, setorId) {
           if (resultadoCliente && resultadoCliente.cliente) {
             const c = resultadoCliente.cliente;
             console.log(`[atualizarOSComSetor] Dados do cliente vinculado à OS ${osId}: Nome: ${c.razao || c.nome} | Telefones: ${c.fone || c.telefone_celular || c.whatsapp}`);
-            // Enviar mensagem WhatsApp para o cliente usando twillioService.js
+            // Enviar mensagem WhatsApp para o cliente usando twillioService.js (WAHA por padrão)
             try {
               const { enviarMensagemWhatsApp } = require('./twillioService');
               const numeroDestino = c.whatsapp || c.telefone_celular || c.fone;
               if (numeroDestino) {
                 const numeroFormatado = numeroDestino.startsWith('+') ? numeroDestino : `+55${numeroDestino.replace(/\D/g, '')}`;
+                // Montar mensagem de apresentação com sufixo do CPF
+                const cpfRaw = c.cnpj_cpf || '';
+                const cpfDigits = (cpfRaw.match(/\d/g) || []).join('');
+                const sufixoCPF = cpfDigits.length >= 3 ? cpfDigits.slice(-3) : null;
+                const nomeCliente = (c.razao || c.nome || '').trim();
+                const linhas = [];
+                if (nomeCliente) {
+                  linhas.push(`Olá, ${nomeCliente}! Sou o assistente da Ibiunet.`);
+                } else {
+                  linhas.push('Olá! Sou o assistente da Ibiunet.');
+                }
+                linhas.push('Identificamos que você possui uma ordem de serviço pendente para agendamento.');
+                if (sufixoCPF) linhas.push(`Para sua segurança, o final do seu CPF é ${sufixoCPF}.`);
+                linhas.push('Pode me informar o CPF completo para iniciarmos seu atendimento com segurança?');
+                const texto = linhas.join('\n\n');
+
                 const messageData = {
                   to: `whatsapp:${numeroFormatado}`,
-                  from: process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886', // ou seu número aprovado
-                  body: 'Olá'
+                  body: texto
                 };
-                const sid = await enviarMensagemWhatsApp(messageData);
-                console.log(`[atualizarOSComSetor] WhatsApp enviado para ${numeroFormatado}: SID ${sid} (aguardando status...)`);
-                // Buscar status atualizado após 5 segundos
-                setTimeout(async () => {
-                  try {
-                    const twilio = require('twilio');
-                    const accountSid = process.env.TWILIO_ACCOUNT;
-                    const authToken = process.env.TWILIO_API_TOKEN;
-                    const client = twilio(accountSid, authToken);
-                    const msgStatus = await client.messages(sid).fetch();
-                    console.log('[Twilio][DEBUG] Detalhes completos da mensagem:', JSON.stringify(msgStatus, null, 2));
-                    console.log(`[Twilio] Status atualizado da mensagem SID ${sid}: ${msgStatus.status}`);
-                    if (msgStatus.errorCode || msgStatus.errorMessage) {
-                      console.error(`[Twilio] Erro no envio: code=${msgStatus.errorCode}, message=${msgStatus.errorMessage}`);
-                    }
-                  } catch (e) {
-                    console.error(`[Twilio] Erro ao buscar status da mensagem:`, e.message, e.stack);
-                  }
-                }, 5000);
+                const sendResult = await enviarMensagemWhatsApp(messageData);
+                console.log(`[atualizarOSComSetor] WhatsApp enviado para ${numeroFormatado}. Id: ${sendResult}`);
               } else {
                 console.log('[atualizarOSComSetor] Nenhum número válido encontrado para envio de WhatsApp.');
               }
             } catch (erroWhats) {
-              console.error('[atualizarOSComSetor] Erro ao enviar WhatsApp via Twilio:', erroWhats.message);
+              console.error('[atualizarOSComSetor] Erro ao enviar WhatsApp:', erroWhats.message);
             }
           } else {
             console.log(`[atualizarOSComSetor] Não foi possível obter detalhes do cliente para OS ${osId}:`, resultadoCliente && resultadoCliente.mensagem);

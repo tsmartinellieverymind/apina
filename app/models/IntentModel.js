@@ -37,7 +37,7 @@ const INTENTS = [
   new IntentModel('MAIS_DETALHES', 'mais_detalhes', []),
   new IntentModel('RECUSAR_CANCELAR', 'recusar_cancelar', ['INICIO']),
   new IntentModel('MUDAR_DE_OS', 'mudar_de_os', ['ESCOLHER_OS']),
-  new IntentModel('LISTAR_OPCOES', 'listar_opcoes', ['ESCOLHER_OS', 'AGENDAR_DATA']),
+  //new IntentModel('LISTAR_OPCOES', 'listar_opcoes', ['ESCOLHER_OS', 'AGENDAR_DATA']),
   new IntentModel('CONSULTAR_DISPONIBILIDADE_DATA', 'consultar_disponibilidade_data', ['CONFIRMAR_AGENDAMENTO', 'AGENDAR_OUTRA_DATA'])
 ];
 

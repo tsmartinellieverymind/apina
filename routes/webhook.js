@@ -448,11 +448,97 @@ function gerarMensagemOSNaoSelecionada(user, mensagemPersonalizada = null) {
 /* ---------------------------------------------------------
    Rota principal – Webhook Twilio
 --------------------------------------------------------- */
+const { isDuplicateKey, normalizeBodyForDedup, hashString } = require('../services/dedupStore');
+
+// In-memory inbound dedup per process (avoids suppressing first delivery after restart)
+const inboundSeen = new Map(); // id -> ts
+const INBOUND_TTL_MS = 15 * 1000;      // 15s
+const OUTBOUND_TTL_MS = 15 * 1000;     // 15s
+const SENDER_COOLDOWN_MS = 800;        // 800ms
+const RESPOND_ONCE_TTL_MS = 30 * 1000; // 30s
+function inboundIsDuplicate(id) {
+  if (!id) return false;
+  const now = Date.now();
+  for (const [k, ts] of inboundSeen) {
+    if (now - ts > INBOUND_TTL_MS) inboundSeen.delete(k);
+  }
+  if (inboundSeen.has(id)) return true;
+  inboundSeen.set(id, now);
+  return false;
+}
+
 router.post('/', express.urlencoded({ extended: false }), async (req, res) => { // Adicionado urlencoded para Twilio audio
   // Log da requisição completa para depuração (semelhante ao webhook_voz)
   console.log('--- [Webhook Unificado] INCOMING REQUEST ---');
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Body:', JSON.stringify(req.body, null, 2));
+  // console.log('Headers:', JSON.stringify(req.headers, null, 2)); // verbose
+  // console.log('Body:', JSON.stringify(req.body, null, 2)); // verbose
+
+  // WAHA: deduplicar pelo ID mapeado no adapter, quando disponível
+  const incomingId = req.body?._waha?.messageId;
+  if (incomingId) {
+    if (inboundIsDuplicate(String(incomingId))) {
+      console.log('[DEDUP][INBOUND][MSGID] hit', JSON.stringify({ messageId: incomingId, ttlMs: INBOUND_TTL_MS }));
+      return res.status(200).json({ status: 'ignored-duplicate' });
+    }
+  }
+
+  // Fallback: dedup por conteúdo (From|Body) em janela curta, para casos onde WAHA muda o ID
+  const fromKey = req.body?.From || '';
+  const rawBody = (typeof req.body.Body === 'string' ? req.body.Body : '') || '';
+  const norm = normalizeBodyForDedup(rawBody);
+  const bodyKey = norm.normalized;
+
+  // Cooldown por remetente: evita processar duas entradas do mesmo remetente em janela muito curta
+  if (!global.__senderCooldown) global.__senderCooldown = new Map();
+  const lastTs = global.__senderCooldown.get(fromKey) || 0;
+  const nowTs = Date.now();
+  if (fromKey && nowTs - lastTs < SENDER_COOLDOWN_MS) {
+    console.log('[DEDUP][INBOUND][COOLDOWN] hit', JSON.stringify({ from: fromKey, cooldownMs: SENDER_COOLDOWN_MS }));
+    return res.status(200).json({ status: 'ignored-cooldown' });
+  }
+  global.__senderCooldown.set(fromKey, nowTs);
+
+  const compositeKey = `${fromKey}|${bodyKey}`;
+
+  // Guardião de resposta única por evento de entrada
+  if (!global.__respondedOnce) global.__respondedOnce = new Map(); // key -> ts
+  function hasResponded(key) {
+    const now = Date.now();
+    // prune
+    for (const [k, ts] of global.__respondedOnce) {
+      if (now - ts > RESPOND_ONCE_TTL_MS) global.__respondedOnce.delete(k);
+    }
+    return global.__respondedOnce.has(key);
+  }
+  function markResponded(key) {
+    global.__respondedOnce.set(key, Date.now());
+  }
+
+  const respondKey = incomingId ? `id:${incomingId}` : `key:${compositeKey}`;
+  // Guard contra processamento concorrente do mesmo evento
+  if (!global.__processingLocks) global.__processingLocks = new Map(); // key -> ts
+  const nowLock = Date.now();
+  // Limpa locks antigos
+  for (const [k, ts] of global.__processingLocks) {
+    if (nowLock - ts > RESPOND_ONCE_TTL_MS) global.__processingLocks.delete(k);
+  }
+  if (global.__processingLocks.has(respondKey)) {
+    console.log('[DEDUP][INBOUND][LOCK] already-processing', JSON.stringify({ respondKey }));
+    return res.status(200).json({ status: 'ignored-processing' });
+  }
+  global.__processingLocks.set(respondKey, nowLock);
+  if (hasResponded(respondKey)) {
+    console.log('[DEDUP][INBOUND][RESPOND-ONCE] hit', JSON.stringify({ respondKey, ttlMs: RESPOND_ONCE_TTL_MS }));
+    global.__processingLocks.delete(respondKey);
+    return res.status(200).json({ status: 'ignored-already-responded' });
+  }
+  if (fromKey && bodyKey) {
+    if (isDuplicateKey(compositeKey, INBOUND_TTL_MS)) {
+      console.log('[DEDUP][INBOUND][BODY] hit', JSON.stringify({ key: compositeKey, from: fromKey, body: bodyKey, ttlMs: INBOUND_TTL_MS }));
+      global.__processingLocks.delete(respondKey);
+      return res.status(200).json({ status: 'ignored-duplicate' });
+    }
+  }
 
   let mensagem = '';
   if (typeof req.body.Body === 'string') {
@@ -464,6 +550,9 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
   }
   const numero = req.body.From;
   const audioUrl = req.body.MediaUrl0;
+
+  // Log inbound resumido
+  console.log('[WEBHOOK] inbound:', { From: numero, Body: mensagem, messageId: incomingId });
 
   if (!mensagem && audioUrl) {
     try {
@@ -504,6 +593,11 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
   if (user.tipoUltimaPergunta === 'DETALHES_VISITA') {
     contexto += '\n\nCONTEXTO IMPORTANTE: A última mensagem do sistema perguntou "Deseja ver detalhes do dia da visita?". Se o usuário responder afirmativamente (sim, yes, quero, gostaria, etc.), a intent deve ser "mais_detalhes".';
   }
+
+  // Adicionar contexto para confirmação de agendamento
+  if (user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO') {
+    contexto += '\n\nCONTEXTO IMPORTANTE: A última mensagem do sistema foi uma sugestão de agendamento. Se o usuário responder afirmativamente (sim, ok, pode ser, fechado, etc.) SEM mencionar outra data ou período, a intent DEVE ser "confirmar_agendamento".';
+  }
   let resposta = '';
 
   try {
@@ -539,6 +633,12 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
       user.tipoUltimaPergunta = null;
     }
 
+    // Limpar contexto de sugestão de agendamento após uso
+    if (user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO' && intent === 'confirmar_agendamento') {
+      console.log('[DEBUG] Limpando tipoUltimaPergunta após detecção correta de confirmar_agendamento');
+      user.tipoUltimaPergunta = null;
+    }
+
     console.log("================== Nova Intent Detectada ==================")
     console.log("==================" + intent + "=============================")
     console.log("================== Nova Intent Detectada ==================")
@@ -561,7 +661,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           user.etapaAnterior = null;
           user.mensagemAnteriorCliente = null;
           user.mensagemAnteriorGPT = null;
-          console.log('[DEBUG] extrair_cpf: Variáveis de sessão limpas para novo CPF');
+          // console.log('[DEBUG] extrair_cpf: user.osList', user.osList); // LOG-OS-INTEIRAão limpas para novo CPF');
           resposta = user._respostaCPF;
           const cpf = extrairCpf(mensagem);
           
@@ -656,35 +756,38 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
                 const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
                 const assunto = formatarDescricaoOS(user.osEscolhida);
                 
-                partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\nTenho uma sugestão de agendamento: ${diaSemana}, ${dataFormatada} pela ${periodoExtenso} para sua visita de ${assunto}. Confirma esse agendamento?`);
+                partes.push(`Vi que você possui OS aberta. Agora, seguem os detalhes:`);
+                partes.push(`${osInfo}`);
+                partes.push(`Ela tem disponibilidade para ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}.`);
+                // Pergunta única ao final
+                partes.push(`Gostaria de agendar essa visita?`);
               } else {
                 console.log(`[DEBUG] extrair_cpf: Não foram encontradas sugestões`);
                 // Se não há sugestão disponível, usar a função de tratamento de indisponibilidade
                 const mensagemIndisponibilidade = tratarIndisponibilidadeAgendamento(user);
-                partes.push(`Encontrei 1 OS aberta:\n${osInfo}\n\n${mensagemIndisponibilidade}`);
+                partes.push(`Vi que você possui OS aberta. Aqui está:`);
+                partes.push(`${osInfo}`);
+                partes.push(`${mensagemIndisponibilidade}`);
               }
             } else if (osAbertas.length > 1) {
               const listaAbertas = osAbertas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
-              partes.push(`Encontrei ${osAbertas.length} OS aberta(s):\n${listaAbertas}\nSe quiser, posso te ajudar a agendar uma visita. Informe o número da OS para agendar.`);
+              partes.push(`Vi que você possui OS em aberto. Agora, seguem suas OS abertas:`);
+              partes.push(`${listaAbertas}`);
+              // Pergunta única ao final
+              partes.push(`Gostaria de agendar uma delas agora? Se sim, me diga o número da OS que deseja agendar.`);
             }
             
-            if (osAgendadas.length) {
-              const listaAgendadas = osAgendadas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
-              
-              if (osAgendadas.length === 1) {
-                // Para uma única OS agendada, pergunta direta sobre detalhes
-                partes.push(`Você já possui 1 OS agendada:\n${listaAgendadas}\nDeseja ver detalhes do dia da visita?`);
+            // Se não há OS abertas, podemos listar as agendadas (sem duplicar perguntas)
+            if (!osAbertas.length) {
+              if (osAgendadas.length > 0) {
+                const listaAgendadas = osAgendadas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n');
+                partes.push(`No momento você não tem OS abertas. Porém, encontrei ${osAgendadas.length} OS agendada(s):`);
+                partes.push(`${listaAgendadas}`);
+                // Pergunta única ao final (detalhar ou reagendar)
+                partes.push(`Deseja ver mais detalhes ou reagendar alguma delas? Se quiser, me informe o número da OS.`);
               } else {
-                // Para múltiplas OSs agendadas, pede o número da OS
-                partes.push(`Você já possui ${osAgendadas.length} OS agendada(s):\n${listaAgendadas}\nDeseja ver detalhes do dia da visita? Responda com o número da OS para mais informações.`);
+                partes.push('Não há OS abertas no momento.');
               }
-              
-              // Definir contexto da última pergunta para ajudar na detecção de intent
-              user.tipoUltimaPergunta = 'DETALHES_VISITA';
-            }
-            
-            if (!osAbertas.length && !osAgendadas.length) {
-              partes.push('Não há OS abertas ou agendadas no momento.');
             }
             
             resposta = partes.join('\n\n');
@@ -692,7 +795,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'recusar_cancelar': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // Limpa variáveis relacionadas ao fluxo
@@ -705,7 +808,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'mudar_de_os': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // Limpar variáveis relacionadas ao agendamento
@@ -796,7 +899,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'listar_opcoes': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           user.osEscolhida = null;
@@ -835,7 +938,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'aleatorio': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           // Verificar se o usuário está respondendo a uma sugestão de OS
@@ -918,10 +1021,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'verificar_os': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
-          //limpa dados de OS selecionada e dados relacionados
+          // Limpa dados de OS selecionada e dados relacionados
           user.osEscolhida = null;
           user.dataInterpretada = null;
           user.periodoAgendamento = null;
@@ -930,31 +1033,71 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           const osAgendadas = lista.filter(o => o.status === 'AG');
           user.osList = lista.filter(o => ['A', 'AG', 'EN'].includes(o.status));
 
-          let partes = [];
-          if (osAbertas.length) {
-            const listaAbertas = formatarListaOS(osAbertas);
-            const plural = osAbertas.length > 1;
-            partes.push(
-              `OS aberta${plural ? 's' : ''} encontrada${plural ? 's' : ''} (${osAbertas.length}):\n${listaAbertas}\n\n` +
-              `Gostaria de agendar ${plural ? 'alguma delas' : 'ela'}?`
-            );
-          }
-          if (osAgendadas.length) {
-            const listaAgendadas = formatarListaOS(osAgendadas);
-            const plural = osAgendadas.length > 1;
-            partes.push(
-              `OS agendada${plural ? 's' : ''} encontrada${plural ? 's' : ''} (${osAgendadas.length}):\n${listaAgendadas}\n\n` +
-              `Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'ela'}?`
-            );
-          }
-          if (!osAbertas.length && !osAgendadas.length) {
-            partes.push('Não há OS abertas ou agendadas no momento.');
+          // Detectar preferência do usuário: "aberta" vs "agendada"
+          const msgNorm = (mensagem || '').toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+          const querAbertas = /aberta|aberto/.test(msgNorm);
+          const querAgendadas = /agendada|agendado|agendada[s]?|detalhe|visita|marcada|reagendar/.test(msgNorm);
+
+          const partes = [];
+          // Prefácio amigável
+          partes.push(`Certo, vou verificar suas ordens de serviço agora.`);
+
+          const addAbertas = () => {
+            if (osAbertas.length) {
+              const listaAbertas = formatarListaOS(osAbertas);
+              const plural = osAbertas.length > 1;
+              partes.push(
+                `Você tem ${osAbertas.length} OS aberta${plural ? 's' : ''}:
+${listaAbertas}
+
+Gostaria de agendar ${plural ? 'alguma delas' : 'esta OS'}?`
+              );
+            } else {
+              partes.push('No momento você não tem OS abertas.');
+            }
+          };
+
+          const addAgendadas = () => {
+            if (osAgendadas.length) {
+              const listaAgendadas = formatarListaOS(osAgendadas);
+              const plural = osAgendadas.length > 1;
+              partes.push(
+                `Você tem ${osAgendadas.length} OS agendada${plural ? 's' : ''}:
+${listaAgendadas}
+
+Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'}?`
+              );
+            }
+          };
+
+          if (querAbertas && !querAgendadas) {
+            // Usuário perguntou especificamente por abertas
+            addAbertas();
+            if (!osAbertas.length && osAgendadas.length) {
+              // Ajuda adicional se não houver abertas
+              addAgendadas();
+            }
+          } else if (querAgendadas && !querAbertas) {
+            addAgendadas();
+            if (!osAgendadas.length && osAbertas.length) {
+              addAbertas();
+            }
+          } else {
+            // Genérico: mostrar abertas primeiro, depois agendadas
+            addAbertas();
+            addAgendadas();
+            if (!osAbertas.length && !osAgendadas.length) {
+              partes.push('Não há OS abertas ou agendadas no momento.');
+            }
           }
 
           resposta = partes.join('\n\n');
           break;
         }
         case 'escolher_os': {
+          console.log("\n[LOG] ➡️ Entrando no case 'escolher_os'\n");
           if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
@@ -1049,7 +1192,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'datas_disponiveis': {
-          if (!ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } })) {
+          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           const respostaObj = { get resposta() { return resposta; }, set resposta(value) { resposta = value; } };
@@ -1495,16 +1638,22 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const dataSug = sugestoes.sugestao.data;
             const periodoSug = sugestoes.sugestao.periodo;
 
-            // Armazenar a sugestão principal para uso na confirmação
+            // Armazenar a sugestão principal e atualizar o estado da conversa
             user.sugestaoData = dataSug;
             user.sugestaoPeriodo = periodoSug;
-            user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO'; // Indica que uma sugestão foi feita
-            console.log(`[DEBUG] Sugestão principal armazenada para confirmação: Data=${user.sugestaoData}, Período=${user.sugestaoPeriodo}`);
+            user.id_tecnico = sugestoes.sugestao.id_tecnico; // Armazena o técnico da sugestão
+            user.etapaAnterior = user.etapaAtual;
+            user.etapaAtual = 'aguardando_confirmacao_agendamento';
+            user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
+            console.log(`[DEBUG] Sugestão principal armazenada e etapa atualizada para 'aguardando_confirmacao_agendamento'`);
 
             const dataFormatada = dayjs(dataSug).format('DD/MM/YYYY');
             const diaSemana = diaDaSemanaExtenso(dataSug);
             const periodoExtenso = periodoSug === 'M' ? 'manhã' : 'tarde';
             const assunto = formatarDescricaoOS(user.osEscolhida);
+            
+            resposta = `${diaSemana}, ${dataFormatada} pela ${periodoExtenso} está disponível para agendamento da OS ${user.osEscolhida.id} (${assunto}). Está bom para você ou prefere outra opção? Se preferir, posso verificar outras datas disponíveis.`;
+            console.log(`[LOG] 💬 Resposta construída no case 'escolher_os': ${resposta}`);
 
             // Alternativas
             let alternativas = '';
@@ -1955,19 +2104,29 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           break;
         }
         case 'confirmar_escolha_os': {
+          console.log("\n[LOG] ➡️ Entrando no case 'confirmar_escolha_os'\n");
           if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
           if (!user.osEscolhida) {
             console.log('Nenhuma OS escolhida');
-            console.log('user', user);
+            // console.log('user', user); // LOG-OS-INTEIRA
             console.log('mensagem do usuário:', mensagem);
-            
-            // Se há apenas uma OS disponível e o usuário está confirmando (sim, ok, etc.)
-            if (user.osList && user.osList.length === 1) {
-              const mensagemLower = mensagem.toLowerCase().trim();
-              const confirmacoesPositivas = ['sim', 'ok', 'pode ser', 'fechado', 'confirmo', 'quero', 'vamos', 'perfeito'];
-              
+
+            const mensagemLower = (mensagem || '').toLowerCase().trim();
+            const confirmacoesPositivas = ['sim', 'ok', 'pode ser', 'fechado', 'confirmo', 'quero', 'vamos', 'perfeito', 'isso', 'isso mesmo', 'claro'];
+
+            // Caso 1: Existe APENAS 1 OS ABERTA e o usuário respondeu afirmativamente
+            if (Array.isArray(user.osList) && confirmacoesPositivas.some(p => mensagemLower.includes(p))) {
+              const osAbertas = user.osList.filter(os => os.status === 'A' || os.status === 'EN');
+              if (!user.osEscolhida && osAbertas.length === 1) {
+                console.log('[DEBUG] confirmar_escolha_os: Selecionando automaticamente a única OS aberta após confirmação do usuário');
+                user.osEscolhida = osAbertas[0];
+              }
+            }
+
+            // Caso 2: Se não havia apenas 1 aberta, mas há somente 1 OS no total
+            if (!user.osEscolhida && user.osList && user.osList.length === 1) {
               if (confirmacoesPositivas.some(palavra => mensagemLower.includes(palavra))) {
                 console.log('[DEBUG] confirmar_escolha_os: Selecionando única OS disponível automaticamente');
                 user.osEscolhida = user.osList[0];
@@ -1995,8 +2154,8 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
         
           // Sugerir datas disponíveis para a OS escolhida, se possível
           const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
-          console.log('[confirmar_escolha_os] user', user); 
-          console.log('[confirmar_escolha_os] user.osEscolhida', user.osEscolhida);
+          // console.log('[confirmar_escolha_os] user', user); // LOG-OS-INTEIRA
+          // console.log('[confirmar_escolha_os] user.osEscolhida', user.osEscolhida); // LOG-OS-INTEIRA
           //console.log('[confirmar_escolha_os] sugestoes', sugestoes);
           //console.log('[confirmar_escolha_os] sugestoes.sugestao', sugestoes.sugestao);
           if (sugestoes && sugestoes.sugestao && sugestoes.sugestao.data && sugestoes.sugestao.periodo) {
@@ -2008,12 +2167,15 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             const assunto = formatarDescricaoOS(user.osEscolhida);
             
             resposta = `Perfeito! Vamos agendar a visita para a OS ${user.osEscolhida.id} (${assunto}).\nSe preferir, tenho uma sugestão: ${diaSemana}, dia ${dataFormatada}, no período da ${periodoExtenso}.\nSe quiser outra data ou período, é só me informar! Qual data e período você prefere?`;
+          console.log(`[LOG] 💬 Resposta construída no case 'confirmar_escolha_os': ${resposta}`);
           } else {
             resposta = tratarIndisponibilidadeAgendamento(user);
             user.osEscolhida = null;
           }
-          // Atualiza etapa para esperar data/período
+          // Atualiza etapa para esperar confirmação ou nova data
           user.etapaAnterior = user.etapaAtual;
+          user.etapaAtual = 'aguardando_confirmacao_agendamento';
+          user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
           break;
         }
         case 'verificar_os': {
@@ -2259,7 +2421,24 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
       messageData.body = resposta;
     }
 
-    await enviarMensagemWhatsApp(messageData);
+    // Outbound guard: evita envio duplicado do mesmo conteúdo em janela curta
+    let outboundBody = '';
+    if (messageData.mediaUrl && messageData.mediaUrl.length > 0) {
+      outboundBody = `media:${hashString(messageData.mediaUrl[0])}`;
+    } else {
+      const normOut = normalizeBodyForDedup(messageData.body || '');
+      outboundBody = normOut.normalized;
+    }
+    const outboundKey = `out:${numero}:${outboundBody}`;
+    if (isDuplicateKey(outboundKey, OUTBOUND_TTL_MS)) {
+      console.log('[DEDUP][OUTBOUND] hit', JSON.stringify({ key: outboundKey, numero, ttlMs: OUTBOUND_TTL_MS }));
+    } else {
+      // Marca que este inbound teve resposta, para não responder diferente em outra rota
+      markResponded(respondKey);
+      await enviarMensagemWhatsApp(messageData);
+    }
+    // Libera o lock de processamento
+    global.__processingLocks.delete(respondKey);
     console.log(`✅ Mensagem enviada para ${numero}. Conteúdo: ${messageData.body || messageData.mediaUrl}`);
 
     // Prepara o payload de resposta detalhado para o HTTP response

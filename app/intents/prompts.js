@@ -46,7 +46,7 @@ const intentsOtimizado = {
 
   verificar_os: {
     "intent": "verificar_os",
-    "descricao": "Ativa quando o usuário solicita informações sobre o status, andamento ou agendamento de uma ordem de serviço (OS). Reconhece perguntas sobre prazos, datas e visitas técnicas.",
+    "descricao": "Ativa quando o usuário solicita informações sobre o status, andamento ou agendamento de uma ordem de serviço (OS). Reconhece perguntas sobre prazos, datas e visitas técnicas.Ativa quando o usuário solicita visualizar novamente as opções disponíveis, seja de ordens de serviço ou datas para agendamento. Reconhece pedidos de repetição ou listagem de alternativas.",
     "exemplos_usuario": [
       "qual o status da minha OS?",
       "quando o técnico vai vir?",

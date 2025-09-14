@@ -2,8 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const axios = require('axios');
 const conectarMongo = require('./config/mongo'); // conexão com MongoDB
-const webhook = require('./routes/webhook');     // rota do bot
+const webhook = require('./routes/webhook');     // pipeline de conversa existente
+const wahaAdapter = require('./routes/wahaAdapter'); // adapta payload WAHA -> formato Twilio-like
 const { iniciarJobAtribuirSetorOS } = require('./jobs/atribuirSetorOS'); // job de atribuição de setores
 
 
@@ -45,8 +47,14 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// 👇 Rota usada pelo Twilio
-app.use('/whatsapp-webhook', webhook);
+// 👇 WAHA como transporte: adaptamos o payload e reaproveitamos o pipeline existente
+app.use('/whatsapp-webhook', wahaAdapter, webhook);
+
+// (Opcional) Ativar Twilio somente se habilitado
+if (process.env.ENABLE_TWILIO === 'true') {
+  console.log('ℹ️ Twilio webhook habilitado (ENABLE_TWILIO=true)');
+  app.use('/twilio-webhook', webhook);
+}
 
 // Rota mock para API de agentes
 app.get('/api/agents', (req, res) => {
@@ -84,6 +92,33 @@ app.get('/api/agents/:id', (req, res) => {
 // Rota de teste para verificar se o CORS está funcionando
 app.get('/api/test-cors', (req, res) => {
   res.json({ message: 'CORS está funcionando corretamente!' });
+});
+
+// Endpoint para testar o webhook local do WAHA com um payload simulado
+app.post('/api/test-waha-webhook', async (req, res) => {
+  try {
+    const PORT = process.env.PORT || 5000;
+    const phoneRaw = (req.body.phone || '').toString();
+    const text = (req.body.text || 'oi').toString();
+    const onlyDigits = phoneRaw.replace(/\D/g, '');
+    const chatId = onlyDigits ? `${onlyDigits}@c.us` : '5511999999999@c.us';
+
+    const payload = {
+      event: 'message',
+      data: {
+        chatId,
+        text,
+        fromMe: false
+      }
+    };
+
+    const url = `http://127.0.0.1:${PORT}/whatsapp-webhook`;
+    const { status } = await axios.post(url, payload, { timeout: 10000 });
+    return res.status(200).json({ ok: true, forwardedStatus: status, payload });
+  } catch (e) {
+    console.error('Erro ao testar webhook WAHA local:', e.message);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Rota de teste para o webhook

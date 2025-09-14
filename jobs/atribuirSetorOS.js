@@ -147,6 +147,56 @@ async function processarOSAbertas() {
         const atualizado = await ixcService.atualizarOSComSetor(os, setorId);
         if (atualizado) {
           console.log(`[INFO] OS ${os.id} atualizada com setor ${setorId}.`);
+
+          // Enviar notificação via WAHA após atualizar a OS, se habilitado
+          if (process.env.WAHA_NOTIFY_JOB === 'true') {
+            try {
+              const { ensureSession, sendText } = require('../services/wahaService');
+              const session = process.env.WAHA_SESSION || 'default';
+              await ensureSession(session);
+
+              // Tentar obter telefone do .env primeiro; depois, de campos comuns na OS
+              const candidato = (process.env.WAHA_TEST_PHONE || os.telefone || os.celular || os.fone || os.fone_celular || os.whatsapp || '').toString();
+              const phone = candidato.replace(/\D/g, '');
+
+              if (phone && phone.length >= 10) {
+                // Buscar cliente para obter os 3 últimos dígitos do CPF (sem expor o número completo)
+                let sufixoCPF = null;
+                try {
+                  const idCliente = os.id_cliente || os.idCliente || os.cliente_id;
+                  if (idCliente) {
+                    const resCliente = await ixcService.buscarClientePorId(String(idCliente));
+                    const cpfRaw = resCliente?.cliente?.cnpj_cpf || '';
+                    const cpfDigits = (cpfRaw.match(/\d/g) || []).join('');
+                    if (cpfDigits.length >= 3) sufixoCPF = cpfDigits.slice(-3);
+                  }
+                } catch (e) {
+                  console.warn('[WAHA][JOB] Não foi possível obter sufixo do CPF do cliente:', e?.message || e);
+                }
+
+                const nomeCliente = (resCliente?.cliente?.razao || resCliente?.cliente?.nome || '').trim();
+                const linhas = [];
+                if (nomeCliente) {
+                  linhas.push(`Olá, ${nomeCliente}! Sou o assistente da Ibiunet.`);
+                } else {
+                  linhas.push('Olá! Sou o assistente da Ibiunet.');
+                }
+                linhas.push('Identificamos que você possui uma ordem de serviço pendente para agendamento.');
+                if (sufixoCPF) {
+                  linhas.push(`Para sua segurança, o final do seu CPF é ${sufixoCPF}.`);
+                }
+                linhas.push('Pode me informar o CPF completo para iniciarmos seu atendimento com segurança?');
+
+                const texto = linhas.join('\n\n');
+                await sendText({ session, phone, text: texto });
+                console.log(`[WAHA][JOB] Mensagem enviada para +${phone} sobre OS ${os.id}.`);
+              } else {
+                console.log('[WAHA][JOB] Telefone indisponível/ inválido; notificação não enviada.');
+              }
+            } catch (e) {
+              console.error('[WAHA][JOB] Falha ao enviar notificação:', e?.response?.data || e.message || e);
+            }
+          }
         } else {
           console.error(`[ERRO] Falha ao atualizar OS ${os.id} com setor ${setorId}.`);
         }
