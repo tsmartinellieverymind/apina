@@ -26,6 +26,121 @@ function gerarTodasAsIntentsPrompt() {
   }).join('\n\n');
 }
 
+async function refatorarResposta(resposta, agentId, user, intent, mensagem, contexto) {
+  const agent = loadAgent(agentId);
+
+  const prompt = `
+Você é **${agent.nome}**.  
+- Função: ${agent.role}  
+- Personalidade: ${agent.personality}  
+
+Sua missão é **refatorar a mensagem do agente** para que pareça mais humana, clara e natural e principalmente deve fazer sentido com a mensagem anteiror do usuário. 
+
+### Instruções
+1. Mantenha o **sentido original** da mensagem (${resposta}), mas ajuste tom e fluidez.  
+1.1 Se a base for pergunta, a saída deve terminar com “?”.
+1.2 Se for afirmação, mantenha como afirmação.
+2. Se houver incoerência com o contexto, corrija de forma suave.  
+3. Evite repetições e frases robóticas.  
+4. Só mude o conteúdo de fato se for necessário para a conversa fazer sentido.  
+5. Respeite a personalidade do agente e mantenha consistência.  
+6. Abuse de piadinhas e expressões humanas para tornar a mensagem mais natural.
+7. Use emojis sempre que possível. Com abundancia.
+8. Respeite as normas LGPD e DPO.
+9. Nunca fale que o agendamento está para determinado horario diga sempre que está no periodo da manhã ou tarde.
+
+### Contexto
+- Intent: ${intent}  
+- Última mensagem do usuário: "${mensagem}"  
+
+### IMPORTANTE
+- Retorne **apenas a mensagem final** para o usuário.  
+- Não use JSON, rótulos ou explicações adicionais. 
+- Nunca diga algo como "esta aqui sua mensagem aprimorada".
+`;
+
+  logPrompt('prompt Mensagem supervisor:', prompt);
+  console.log('prompt Mensagem supervisor:', prompt);
+
+  try {
+    const respostaFinal = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: `Você é ${agent.nome}, com a personalidade: ${agent.personality}` },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.9
+    });
+
+    return respostaFinal.choices[0].message.content.trim();
+  } catch (error) {
+    logPrompt('❌ Erro ao gerar resposta da intent:', error);
+    return 'Desculpa, não consegui processar isso agora. Pode repetir?';
+  }
+}
+
+
+async function verificaTipoListagem(resposta, agentId, user, intent, mensagem, contexto) {
+  const agent = loadAgent(agentId);
+
+  // Construir contexto estruturado separando Abertas e Agendadas
+  const lista = Array.isArray(user?.osList) ? user.osList : [];
+  const abertas = lista.filter(o => o.status === 'A');
+  const agendadas = lista.filter(o => o.status === 'AG');
+
+  const resumoAbertas = abertas.length
+    ? `OS Abertas (${abertas.length}):\n${abertas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n')}`
+    : 'OS Abertas (0)';
+
+  const resumoAgendadas = agendadas.length
+    ? `OS Agendadas (${agendadas.length}):\n${agendadas.map(o => `• ${o.id} - ${o.descricaoAssunto || o.titulo || o.mensagem || 'Sem descrição'}`).join('\n')}`
+    : 'OS Agendadas (0)';
+
+  // Indicar se há uma última lista exibida ao usuário
+  const ultimaListaInfo = Array.isArray(user?.ultimaListaOS) && user.ultimaListaOS.length
+    ? `\n\nÚltima lista exibida contém ${user.ultimaListaOS.length} itens (use isso como referência ao interpretar escolhas).`
+    : '';
+
+  const prompt = `
+Você é **${agent.nome}**.  
+- Função: Sua missão é identificar se o usuário deseja ver as OSs abertas, agendadas ou todas.
+
+### Contexto
+- Intent: ${intent}  
+- Última mensagem do usuário: "${mensagem}"  
+
+${resumoAbertas}
+
+${resumoAgendadas}
+${ultimaListaInfo}
+
+### IMPORTANTE
+- Responda APENAS com uma das três opções: AGENDADAS, ABERTAS, TODAS
+- Não use JSON, rótulos ou explicações adicionais.  
+`;
+
+  logPrompt('prompt Mensagem supervisor:', prompt);
+  console.log('prompt Mensagem supervisor:', prompt);
+
+  try {
+    const respostaFinal = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: `Você é ${agent.nome}, com a personalidade: ${agent.personality}` },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.4
+    });
+
+    return respostaFinal.choices[0].message.content.trim();
+  } catch (error) {
+    logPrompt('❌ Erro ao gerar resposta da intent:', error);
+    return 'Desculpa, não consegui processar isso agora. Pode repetir?';
+  }
+}
+
+
+
 async function gerarMensagemDaIntent({
   intent,
   agentId = 'agent_os',
@@ -109,9 +224,11 @@ Sua função é analisar a mensagem do cliente e detectar qual a intenção dele
    - Se foi sobre **escolha de OS**, e a resposta é de aceitação → **confirmar_escolha_os**.
 7. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
 8. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
-9. Se a última pergunta foi uma lista numerada (1. Ver detalhes, 2. Reagendar) e o usuário responde com um número:
+9. Se a última pergunta foi uma lista numerada (1. Ver detalhes, 2. Reagendar, 3. Voltar) e o usuário responde com um número:
    - Se responder "1" → **mais_detalhes**.
    - Se responder "2" → **mudar_de_os**.
+   - Se responder "3" → **listar_opcoes**.
+10. Se o usuário pedir para **ver**, **listar** ou **mostrar** as OS (ex: "ver as OS em aberto", "quais são as OS", "listar OS", "tem OS aberta", "tem OS agendada") → **listar_opcoes**.
 
 ### Exemplos de Classificação Correta:
 - "pode ser" (sem mencionar data/hora) → **confirmar_agendamento**
@@ -120,6 +237,9 @@ Sua função é analisar a mensagem do cliente e detectar qual a intenção dele
 - "essa data está boa, mas prefiro de tarde" → **alterar_periodo**
 - "tem disponibilidade na sexta?" → **consultar_disponibilidade_data**
 - "quero ver outras opções" → **datas_disponiveis**
+- "tem OS aberta pra mim?" → **listar_opcoes**
+- "quais OS tenho em aberto?" → **listar_opcoes**
+- "tem alguma OS agendada?" → **listar_opcoes**
 
 ### Contexto da conversa:
 - Última intent detectada: ${intentAnterior}
@@ -483,10 +603,10 @@ ${contextoExtra}
 ### Instruções:
 - O cliente pode falar de maneira livre: ("quero a primeira", "prefiro o segundo", "vou querer a 3ª", "primeiro serve", etc).
 - Seu trabalho é interpretar qual posição ele quis (1, 2, 3...).
-- Se identificar claramente, responda o índice em JSON:
-  { "posicao": 1 }
+- Se identificar claramente, responda o numero da OS
+  { "osNr": 1 }
 - Se não identificar, retorne:
-  { "posicao": null }
+  { "osNr": null }
 
 Frase do cliente:
 "${mensagem}"
@@ -504,7 +624,7 @@ Responda APENAS o JSON pedido.
   });
 
   const json = JSON.parse(resposta.choices[0].message.content);
-  return json.posicao ?? null;
+  return json.osNr ?? null;
 }
 
 /**
@@ -688,5 +808,8 @@ module.exports = {
   detectarIntentComContexto,
   gerarMensagemDaIntent,
   buscarSetorPorBairro,
-  findSetorByBairro
+  findSetorByBairro,
+  refatorarResposta,
+  verificaTipoListagem
+
 };

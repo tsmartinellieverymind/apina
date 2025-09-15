@@ -946,11 +946,16 @@ async function buscarOSPorClienteId(clienteId) {
  * @returns {Object} Resultado da atualização
  */
 async function atualizarOS(osId, payload) {
-  console.log('atualizarOS (PUT):', osId, payload);
+  console.log(`[DEBUG] atualizarOS - INICIANDO:`);
+  console.log(`[DEBUG] atualizarOS - OS ID: ${osId}`);
+  console.log(`[DEBUG] atualizarOS - Payload recebido:`, JSON.stringify(payload, null, 2));
+  
   try {
     // Verificar se usuário e senha estão disponíveis
     if (!process.env.API_USER || !process.env.API_PASS) {
-      console.error('❌ Erro: Usuário ou senha da API IXC não configurados para atualizar OS');
+      console.error(`[DEBUG] atualizarOS - ERRO: Credenciais não configuradas`);
+      console.error(`[DEBUG] atualizarOS - API_USER definido: ${!!process.env.API_USER}`);
+      console.error(`[DEBUG] atualizarOS - API_PASS definido: ${!!process.env.API_PASS}`);
       throw new Error('Usuário ou senha da API não configurados');
     }
 
@@ -959,7 +964,12 @@ async function atualizarOS(osId, payload) {
       'Content-Type': 'application/json',
       'ixcsoft': ''
     };
-    // Axios suporta basic auth diretamente
+    
+    console.log(`[DEBUG] atualizarOS - URL: ${url}`);
+    console.log(`[DEBUG] atualizarOS - Headers:`, headers);
+    console.log(`[DEBUG] atualizarOS - Auth user: ${process.env.API_USER}`);
+    console.log(`[DEBUG] atualizarOS - Fazendo requisição PUT...`);
+    
     const response = await api.put(url, payload, {
       headers,
       auth: {
@@ -968,9 +978,17 @@ async function atualizarOS(osId, payload) {
       }
     });
 
+    console.log(`[DEBUG] atualizarOS - Status da resposta: ${response.status}`);
+    console.log(`[DEBUG] atualizarOS - Dados da resposta:`, JSON.stringify(response.data, null, 2));
+    console.log(`[DEBUG] atualizarOS - SUCESSO!`);
+    
     return response.data;
   } catch (error) {
-    console.error('❌ Erro ao atualizar OS:', error);
+    console.error(`[DEBUG] atualizarOS - ERRO CAPTURADO:`);
+    console.error(`[DEBUG] atualizarOS - Erro message: ${error.message}`);
+    console.error(`[DEBUG] atualizarOS - Erro status: ${error.response?.status}`);
+    console.error(`[DEBUG] atualizarOS - Erro data:`, JSON.stringify(error.response?.data, null, 2));
+    console.error(`[DEBUG] atualizarOS - Stack trace:`, error.stack);
     throw error;
   }
 }
@@ -1002,13 +1020,13 @@ async function buscarOSAbertas() {
     console.log(api.getUri());
     console.log('[buscarOSAbertas] Resposta bruta da API:', JSON.stringify(response.data, null, 2));
 
-    // Filtrar OSs com bairro preenchido e limitar a 1 resultado
+    // Filtrar OSs com bairro preenchido
     let registros = response.data && response.data.registros ? response.data.registros : [];
     const registrosComBairro = registros.filter(os => os.bairro && os.bairro.trim() !== '');
     console.log(`[buscarOSAbertas] Total retornado da API: ${registros.length}, com bairro preenchido: ${registrosComBairro.length}`);
    
-   
-    return registrosComBairro.slice(0, 1);
+    // Retornar todas as OSs abertas com bairro preenchido
+    return registrosComBairro;
     
   } catch (error) {
     console.error('Erro ao buscar OSs abertas:', error.message);
@@ -1044,12 +1062,12 @@ async function buscarOSAbertaComBairro() {
     console.log(api.getUri());
     //console.log('[buscarOSAbertaComBairro] Resposta bruta da API:', JSON.stringify(response.data, null, 2));
 
-    // Filtrar OSs com bairro preenchido e limitar a 1 resultado
+    // Filtrar OSs com bairro preenchido
     let registros = response.data && response.data.registros ? response.data.registros : [];
     const registrosComBairro = registros.filter(os => os.bairro && os.bairro.trim() !== '');
     console.log(`[buscarOSAbertaComBairro] Total retornado da API: ${registros.length}, com bairro preenchido: ${registrosComBairro.length}`);
-    // Retorna apenas o primeiro registro com bairro preenchido
-    return registrosComBairro.slice(0, 1);
+    // Retornar todas as OSs abertas com bairro preenchido
+    return registrosComBairro;
 
   } catch (error) {
     console.error('Erro ao buscar OSs abertas:', error.message);

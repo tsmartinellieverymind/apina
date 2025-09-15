@@ -16,8 +16,9 @@ const intentsOtimizado = {
 
   aleatorio: {
     "intent": "aleatorio",
-    "descricao": "Ativa quando o usuário envia mensagens fora do contexto esperado, aborda temas não relacionados ao atendimento, ou responde de forma vaga/imprecisa sem fornecer as informações solicitadas.",
+    "descricao": "Ativa quando o usuário envia mensagens fora do contexto esperado, aborda temas não relacionados ao atendimento, ou responde de forma vaga/imprecisa sem fornecer as informações solicitadas. Até mesmo olá ponde ser aleatório se não tem sentido com a frase anterior do agente",
     "exemplos_usuario": [
+      
       "você gosta de futebol?",
       "acredita em vida extraterrestre?",
       "qual é a sua cor favorita?",
@@ -52,6 +53,7 @@ const intentsOtimizado = {
       "quando o técnico vai vir?",
       "gostaria de saber sobre minha ordem de serviço",
       "tem previsão para o atendimento?",
+      "Qual endereço da minha os?",
       "quero verificar o andamento do meu chamado",
       "a visita técnica já foi agendada?",
       "preciso saber quando vão resolver meu problema"
@@ -222,7 +224,7 @@ const intentsOtimizado = {
 
   recusar_cancelar: {
     "intent": "recusar_cancelar",
-    "descricao": "Ativa quando o usuário expressa desejo de cancelar, desistir ou interromper o processo atual em qualquer etapa do atendimento. Reconhece negativas e solicitações de cancelamento.",
+    "descricao": "Ativa quando o usuário expressa desejo de cancelar, desistir ou interromper o processo atual em qualquer etapa do atendimento. Reconhece negativas e solicitações de cancelamento.Não confundir com por exemplo 'Não vai dar amanhã' nesse caso devemos mandar para 'alterar_periodo'",
     "exemplos_usuario": [
       "não",
       "desisti",
@@ -254,10 +256,15 @@ const intentsOtimizado = {
 
   alterar_periodo: {
     "intent": "alterar_periodo",
-    "descricao": "Ativa quando o usuário aceita a data sugerida, mas solicita mudança apenas no período do dia (manhã, tarde ou noite). Reconhece ajustes de horário mantendo a mesma data.",
+    "descricao": "Ativa quando o usuário aceita a data sugerida, mas solicita mudança apenas no período do dia (manhã, tarde ou noite). Reconhece ajustes de horário mantendo a mesma data. Por exemplo 'Amanhã não vai dar' ou 'No dia que vc me sugeriu eu tenho um aniversário'",
     "exemplos_usuario": [
       "pode ser nesse dia mas pela manhã",
       "quero no mesmo dia mas à tarde",
+      "Amanhã não vai dar",
+      "Ahh eu não sei",
+      "Não sei dizer",
+      "Não sei qual dia",
+      'No dia que vc me sugeriu eu tenho um aniversário',
       "a data está boa, mas prefiro de manhã",
       "sim, mas no período da manhã",
       "concordo com o dia, mas quero mudar para o período da tarde",
@@ -278,8 +285,15 @@ const intentsOtimizado = {
       "quais OS posso agendar?",
       "quais horários posso escolher?",
       "quero ver as opções de data",
+      "Verificar minhas Os",
       "me mostra as OS de novo",
-      "pode repetir as alternativas?"
+      "pode repetir as alternativas?",
+      "queria ver as OS em aberto",
+      "eu quero saber quais são em aberto",
+      "me mostra as OS abertas",
+      "quais são as OS em aberto?",
+      "listar OS abertas",
+      "ver minhas OS"
     ],
     "exemplo_resposta": "Claro! Aqui estão as opções disponíveis: Ordens de Serviço (OS): [listar OS do usuário]. Datas e horários disponíveis: [listar datas e horários sugeridos]. Se quiser escolher uma OS, basta me dizer o número. Para agendar, é só informar a data e horário que preferir!"
   },

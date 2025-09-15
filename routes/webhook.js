@@ -6,6 +6,7 @@ dayjs.locale('pt-br');
 const { diaDaSemanaExtenso } = require('../app/utils/dateHelpers');
 const { logEstado } = require('../app/utils/logger');
 
+
 /* ---------------------------------------------------------
    Configurações
 --------------------------------------------------------- */
@@ -30,11 +31,13 @@ const {
   // verificarDisponibilidade
 } = require('../services/ixcService');
 const {
+  refatorarResposta,
   detectarIntentComContexto,
   gerarMensagemDaIntent,
   interpretarDataNatural,
   interpretarNumeroOS,
-  interpretarEscolhaOS
+  interpretarEscolhaOS,
+  verificaTipoListagem,
 } = require('../services/openaiService');
 
 /* ---------------------------------------------------------
@@ -355,11 +358,8 @@ async function processarEscolhaOS({ mensagem, contexto, intent, osList }) {
     // Tenta extrair o número da OS da mensagem
     const osPattern = /\b(\d{4,6})\b/; // Padrão para encontrar números de 4-6 dígitos (formato típico de OS)
     const osMatch = mensagem.match(osPattern);
-    
     if (osMatch) {
       const osIdExtraido = osMatch[1];
-      console.log(`Número de OS extraído da mensagem: ${osIdExtraido}`);
-      
       // Verificar se a OS existe na lista
       const osEncontrada = osList.find(os => os.id === osIdExtraido);
       if (osEncontrada) {
@@ -367,17 +367,29 @@ async function processarEscolhaOS({ mensagem, contexto, intent, osList }) {
       }
     }
     
-    // Se não encontrou pelo número, tenta interpretar a posição
-    const posicao = await interpretarEscolhaOS({
+    // Se não encontrou pelo número, tenta interpretar o ID da OS via IA
+    const listaAtiva = (contexto && Array.isArray(contexto.ultimaListaOS) && contexto.ultimaListaOS.length)
+      ? contexto.ultimaListaOS
+      : osList;
+
+    const osIdInterpretado = await interpretarEscolhaOS({
       mensagem,
-      osList,
+      osList: listaAtiva,
       agentId: 'agent_os',
       dados: contexto,
-      promptExtra: 'tente identificar a escolha da OS.'
+      promptExtra: 'interprete e retorne o número exato da OS (osNr) dentre a lista apresentada.'
     });
-    
-    if (posicao && osList[posicao - 1]) {
-      return { osObj: osList[posicao - 1] };
+
+    if (osIdInterpretado) {
+      const escolhida = listaAtiva.find(o => String(o.id) === String(osIdInterpretado));
+      if (escolhida) {
+        return { osObj: escolhida };
+      }
+      // Como fallback, tenta no conjunto completo
+      const escolhidaCompleta = osList.find(o => String(o.id) === String(osIdInterpretado));
+      if (escolhidaCompleta) {
+        return { osObj: escolhidaCompleta };
+      }
     }
     
     // Se não conseguiu identificar, retorna mensagem solicitando escolha
@@ -449,6 +461,7 @@ function gerarMensagemOSNaoSelecionada(user, mensagemPersonalizada = null) {
    Rota principal – Webhook Twilio
 --------------------------------------------------------- */
 const { isDuplicateKey, normalizeBodyForDedup, hashString } = require('../services/dedupStore');
+const { datas_disponiveis } = require('../app/intents/prompts');
 
 // In-memory inbound dedup per process (avoids suppressing first delivery after restart)
 const inboundSeen = new Map(); // id -> ts
@@ -580,6 +593,7 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
     mensagemAnteriorGPT: '', mensagemAnteriorCliente: '',
     cpf: null, clienteId: null, nomeCliente: null,
     osList: [], osEscolhida: null,           // osEscolhida é SEMPRE objeto
+    ultimaListaOS: [],                       // última lista exibida ao usuário (em ordem)
     dataInterpretada: null, periodoAgendamento: null
   };
   // Sempre sincroniza o número na sessão
@@ -729,24 +743,109 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             user.nomeCliente = cliente.cliente.razao;
     
             const lista = await buscarOSPorClienteId(user.clienteId);
+            
+            // LOG DETALHADO DE CADA OS ANTES DA FILTRAGEM
+            // console.log(`[DEBUG] extrair_cpf - ANÁLISE DETALHADA DAS OS:`);
+            // lista.forEach((os, index) => {
+            //   console.log(`[DEBUG] OS ${index + 1}/${lista.length}: ID=${os.id}, status='${os.status}', data_agenda_final='${os.data_agenda_final}', melhor_horario_agenda='${os.melhor_horario_agenda}'`);
+            // });
+            
             osAbertas = lista.filter(o => o.status === 'A');
             osAgendadas = lista.filter(o => o.status === 'AG');
             user.osList = lista.filter(o => ['A', 'AG', 'EN'].includes(o.status));
     
-            let partes = [`✅ Cadastro localizado, ${user.nomeCliente}.`];
+            // LOGS DETALHADOS PARA DEBUG
+            // console.log(`[DEBUG] extrair_cpf - Total de OS encontradas: ${lista.length}`);
+            // console.log(`[DEBUG] extrair_cpf - OS Abertas (status='A'): ${osAbertas.length}`);
+            // console.log(`[DEBUG] extrair_cpf - OS Agendadas (status='AG'): ${osAgendadas.length}`);
+            // console.log(`[DEBUG] extrair_cpf - IDs das OS Abertas: ${osAbertas.map(o => o.id).join(', ')}`);
+            // console.log(`[DEBUG] extrair_cpf - IDs das OS Agendadas: ${osAgendadas.map(o => o.id).join(', ')}`);
             
-            // Lógica de apresentação de OSs refatorada para maior clareza
+            let partes = [`✅ Cadastro localizado, ${user.nomeCliente}.`];
 
-            if (osAgendadas.length > 0) {
+            // Se houver exatamente 1 OS aberta, seleciona automaticamente e já sugere data
+            if (osAbertas.length === 1) {
+              user.osEscolhida = osAbertas[0];
+              const assunto = formatarDescricaoOS(user.osEscolhida);
+              const osInfo = `• ${user.osEscolhida.id} - ${assunto}`;
+
+              try {
+                const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
+                if (sugestoes?.sugestao?.data && sugestoes?.sugestao?.periodo) {
+                  user.sugestaoData = sugestoes.sugestao.data;
+                  user.sugestaoPeriodo = sugestoes.sugestao.periodo;
+                  user.id_tecnico = sugestoes.sugestao.id_tecnico;
+                  user.tipoUltimaPergunta = 'AGENDAMENTO_SUGESTAO';
+
+                  const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
+                  const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
+                  const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
+
+                  // Alternativas (até 3, únicas)
+                  let alternativas = '';
+                  if (sugestoes.alternativas && sugestoes.alternativas.length > 0) {
+                    const alternativasUnicas = [];
+                    for (const alt of sugestoes.alternativas) {
+                      if (!alternativasUnicas.some(a => a.data === alt.data && a.periodo === alt.periodo)) {
+                        alternativasUnicas.push(alt);
+                      }
+                      if (alternativasUnicas.length >= 3) break;
+                    }
+                    alternativas = alternativasUnicas.map(alt => {
+                      const dataAlt = dayjs(alt.data).format('DD/MM/YYYY');
+                      const diaAlt = diaDaSemanaExtenso(alt.data);
+                      const periodoAlt = alt.periodo === 'M' ? 'manhã' : 'tarde';
+                      return `• ${diaAlt}, ${dataAlt} pela ${periodoAlt}`;
+                    }).join('\n');
+                  }
+
+                  partes.push(`Encontrei 1 OS aberta e já selecionei para você:\n${osInfo}`);
+                  partes.push(`Minha melhor sugestão é ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}.` + (alternativas ? `\n\nSe preferir, também tenho:\n${alternativas}` : ''));
+                  partes.push('Fica bom para você ou prefere outra data?');
+                  resposta = partes.join('\n\n');
+                  break;
+                } else {
+                  // Sem sugestões válidas: usar mensagem de indisponibilidade apropriada
+                  const mensagemIndisponibilidade = tratarIndisponibilidadeAgendamento(user);
+                  partes.push(`Encontrei 1 OS aberta:\n${osInfo}`);
+                  partes.push(mensagemIndisponibilidade);
+                  resposta = partes.join('\n\n');
+                  break;
+                }
+              } catch (e) {
+                console.error('[extrair_cpf] Erro ao gerar sugestões para OS única:', e);
+                const mensagemIndisponibilidade = tratarIndisponibilidadeAgendamento(user);
+                partes.push(`Encontrei 1 OS aberta:\n${osInfo}`);
+                partes.push(mensagemIndisponibilidade);
+                resposta = partes.join('\n\n');
+                break;
+              }
+            }
+            
+            // Mostrar OS ABERTAS primeiro (disponíveis para agendamento)
+            if (osAbertas.length > 0) {
+              // console.log(`[DEBUG] extrair_cpf - Adicionando ${osAbertas.length} OS abertas à resposta`);
+              const listaAbertas = formatarListaOS(osAbertas, false); // false = sem data pois estão abertas
+              partes.push(`Encontrei ${osAbertas.length} ordem(ns) de serviço aberta(s) disponível(eis) para agendamento:\n${listaAbertas}`);
+              partes.push('Você pode escolher uma delas para agendar. Qual gostaria de agendar?');
+            } else if (osAgendadas.length > 0) {
+              // Só mostrar OS AGENDADAS se NÃO houver OS abertas
+              // console.log(`[DEBUG] extrair_cpf - Nenhuma OS aberta, mostrando ${osAgendadas.length} OS agendadas`);
               const listaAgendadas = formatarListaOS(osAgendadas, true); // true para incluir a data
-              partes.push(`Além disso, encontrei ${osAgendadas.length} visita(s) já agendada(s):\n${listaAgendadas}`);
+              partes.push(`Encontrei ${osAgendadas.length} visita(s) já agendada(s):\n${listaAgendadas}`);
               partes.push('Você pode pedir para ver detalhes ou reagendar uma delas, se precisar.');
             }
 
+            // Caso não tenha nenhuma OS
             if (osAbertas.length === 0 && osAgendadas.length === 0) {
+              // console.log(`[DEBUG] extrair_cpf - Nenhuma OS encontrada para o cliente`);
               partes.push('Não encontrei nenhuma ordem de serviço aberta ou agendada para você no momento.');
-            } 
+            }
+            
+            // console.log(`[DEBUG] extrair_cpf - Resposta final montada com ${partes.length} partes`);
+            
             resposta = partes.join('\n\n');
+            // console.log(`[DEBUG] extrair_cpf - Resposta completa: ${resposta}`);
           }
           break;
         }
@@ -760,7 +859,26 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           user.periodoAgendamento = null;
           // user.etapaAtual = 'inicio';
           user.etapaAnterior = '';
-          resposta = 'Tudo bem, cancelei o processo para você. Se precisar retomar ou tiver outra dúvida, é só me chamar! 😊';
+          resposta = 'Vou cancelar esse atendimento por hora, assim que pensar melhor retorne para fazer o agendamento 😊';
+
+          // Após finalizar/cancelar, recarrega a lista de OS do cliente
+          if (user.clienteId) {
+            console.log(`Recarregando lista de OS após cancelamento para o cliente ${user.clienteId}`);
+            try {
+              buscarOSPorClienteId(user.clienteId)
+                .then(osListAtualizada => {
+                  if (osListAtualizada && osListAtualizada.length > 0) {
+                    user.osList = osListAtualizada;
+                    console.log(`Lista de OS recarregada após cancelamento: ${osListAtualizada.length} OS`);
+                  } else {
+                    user.osList = [];
+                  }
+                })
+                .catch(err => console.error('Erro ao recarregar OS após cancelamento:', err));
+            } catch (e) {
+              console.error('Falha ao iniciar recarga de OS após cancelamento:', e);
+            }
+          }
           break;
         }
         case 'mudar_de_os': {
@@ -768,63 +886,31 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             break;
           }
 
-          // Adiciona uma verificação de segurança para garantir que a lista de OS existe.
-          if (!user.osList) {
-            resposta = 'Para que eu possa encontrar suas ordens de serviço, por favor, me informe seu CPF.';
-            user.tipoUltimaPergunta = 'CPF';
-            break;
-          }
-          
-          // Limpar variáveis de agendamento anteriores para evitar confusão
+          // Limpar variáveis e retornar para a listagem de OS
+          user.osEscolhida = null;
           user.dataInterpretada = null;
           user.periodoAgendamento = null;
-          
-          let osParaReagendar = null;
 
-          // 1. Tenta usar a OS já em contexto (vinda de 'mais_detalhes', por exemplo)
-          if (user.osEscolhida) {
-            console.log(`[DEBUG] mudar_de_os: Usando OS já em contexto: ${user.osEscolhida.id}`);
-            osParaReagendar = user.osEscolhida;
+          const lista = await buscarOSPorClienteId(user.clienteId);
+          if (!lista || lista.length === 0) {
+            resposta = 'Não encontrei nenhuma ordem de serviço para você no momento.';
+            break;
           }
 
-          // 2. Se não há OS em contexto, tenta extrair da mensagem
-          if (!osParaReagendar) {
-            const osPattern = /\b(\d{4,6})\b/;
-            const osMatch = mensagem.match(osPattern);
-            if (osMatch) {
-              const osIdExtraido = osMatch[1];
-              const osEncontrada = user.osList.find(os => os.id === osIdExtraido);
-              if (osEncontrada) {
-                osParaReagendar = osEncontrada;
-                console.log(`[DEBUG] mudar_de_os: OS ${osIdExtraido} extraída da mensagem.`);
-              }
-            }
-          }
+          const osAbertas = lista.filter(o => o.status === 'A');
+          const osAgendadas = lista.filter(o => o.status === 'AG');
 
-          // 3. Se uma OS foi definida (pelo contexto ou pela mensagem), gera sugestões
-          if (osParaReagendar) {
-            user.osEscolhida = osParaReagendar; // Garante que a OS correta está no estado
-            const sugestoes = await gerarSugestoesDeAgendamento(user.osEscolhida);
-
-            if (sugestoes?.sugestao?.data) {
-              user.sugestaoData = sugestoes.sugestao.data;
-              user.sugestaoPeriodo = sugestoes.sugestao.periodo;
-              user.id_tecnico = sugestoes.sugestao.id_tecnico;
-
-              const dataFormatada = dayjs(sugestoes.sugestao.data).format('DD/MM/YYYY');
-              const diaSemana = diaDaSemanaExtenso(sugestoes.sugestao.data);
-              const periodoExtenso = sugestoes.sugestao.periodo === 'M' ? 'manhã' : 'tarde';
-              const assunto = formatarDescricaoOS(user.osEscolhida);
-
-              resposta = `Certo, vamos reagendar a OS ${user.osEscolhida.id} (${assunto}).\nTenho uma sugestão: ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}. Fica bom para você?`;
-            } else {
-              resposta = tratarIndisponibilidadeAgendamento(user);
-            }
+          if (osAbertas.length > 0) {
+            user.ultimaListaOS = [...osAbertas];
+            const listaAbertas = formatarListaOS(osAbertas, false);
+            resposta = `Sem problemas! Aqui estão suas OS abertas disponíveis para agendamento:\n\n${listaAbertas}\n\nQual delas você gostaria de agendar?`;
+          } else if (osAgendadas.length > 0) {
+            user.ultimaListaOS = [...osAgendadas];
+            const listaAg = formatarListaOS(osAgendadas, true);
+            resposta = `No momento você não tem OS abertas, mas possui visitas agendadas:\n\n${listaAg}\n\nSe quiser reagendar alguma, é só me dizer o número.`;
           } else {
-            // 4. Se nenhuma OS foi definida, lista as opções para o usuário
-            user.osEscolhida = null; // Garante que o estado está limpo
-            const listaFormatada = formatarListaOS(user.osList, true);
-            resposta = `Sem problemas! Para qual das suas ordens de serviço você gostaria de um novo agendamento?\n\n${listaFormatada}`;
+            user.ultimaListaOS = [];
+            resposta = 'Você não tem ordens de serviço abertas ou agendadas no momento.';
           }
 
           break;
@@ -833,6 +919,95 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
           if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
             break;
           }
+          
+          //retorna ABERTAS, AGENDADAS ou TODAS
+          const tipoListagem = await verificaTipoListagem(mensagem, 'agent_os', user, intent, mensagem, contexto);
+          
+          if (tipoListagem === 'ABERTAS') {
+            console.log(`[DEBUG] listar_opcoes: Usuário perguntou sobre OS abertas - mensagem: "${mensagem}"`);
+            
+            const lista = await buscarOSPorClienteId(user.clienteId);
+            const osAbertas = lista.filter(o => o.status === 'A');
+            
+            console.log(`[DEBUG] listar_opcoes - Total de OS: ${lista.length}`);
+            console.log(`[DEBUG] listar_opcoes - OS Abertas encontradas: ${osAbertas.length}`);
+            console.log(`[DEBUG] listar_opcoes - IDs das OS Abertas: ${osAbertas.map(o => o.id).join(', ')}`);
+            
+            if (osAbertas.length > 0) {
+              // Salva a ordem exata apresentada ao usuário
+              user.ultimaListaOS = [...osAbertas];
+              const listaAbertas = formatarListaOS(osAbertas, false); // false = sem data pois estão abertas
+              resposta = `Olá, ${user.nomeCliente}! Você tem ${osAbertas.length} ordem(ns) de serviço aberta(s) disponível(eis) para agendamento:\n\n${listaAbertas}\n\nQual gostaria de agendar?`;
+            } else {
+              resposta = `${user.nomeCliente}, você não tem nenhuma ordem de serviço aberta no momento. Todas as suas OS já estão agendadas ou finalizadas.`;
+            }
+            break;
+          }
+          
+          if (tipoListagem === 'AGENDADAS') {
+            console.log(`[DEBUG] listar_opcoes: Usuário perguntou sobre OS agendadas - mensagem: "${mensagem}"`);
+            
+            const lista = await buscarOSPorClienteId(user.clienteId);
+            const osAgendadas = lista.filter(o => o.status === 'AG');
+            
+            console.log(`[DEBUG] listar_opcoes - Total de OS: ${lista.length}`);
+            console.log(`[DEBUG] listar_opcoes - OS Agendadas encontradas: ${osAgendadas.length}`);
+            console.log(`[DEBUG] listar_opcoes - IDs das OS Agendadas: ${osAgendadas.map(o => o.id).join(', ')}`);
+            
+            if (osAgendadas.length > 0) {
+              // Salva a ordem exata apresentada ao usuário
+              user.ultimaListaOS = [...osAgendadas];
+              const listaAgendadas = formatarListaOS(osAgendadas, true); // true para incluir data
+              resposta = `Sim, ${user.nomeCliente}! Você tem ${osAgendadas.length} visita(s) já agendada(s):\n\n${listaAgendadas}\n\nSe precisar reagendar ou ver mais detalhes de alguma, é só me avisar!`;
+            } else {
+              resposta = `Não, ${user.nomeCliente}. Você não tem nenhuma visita agendada no momento. Mas você tem ordens de serviço abertas que podem ser agendadas. Gostaria de ver a lista delas?`;
+            }
+            break;
+          }
+          
+          // Caso TODAS - mostra todas as OS (abertas e agendadas)
+          if (tipoListagem === 'TODAS') {
+            console.log(`[DEBUG] listar_opcoes: Usuário perguntou sobre todas as OS - mensagem: "${mensagem}"`);
+            
+            const lista = await buscarOSPorClienteId(user.clienteId);
+            const osAbertas = lista.filter(o => o.status === 'A');
+            const osAgendadas = lista.filter(o => o.status === 'AG');
+            
+            console.log(`[DEBUG] listar_opcoes - Total de OS: ${lista.length}`);
+            console.log(`[DEBUG] listar_opcoes - OS Abertas: ${osAbertas.length}, OS Agendadas: ${osAgendadas.length}`);
+            
+            let resposta_partes = [`Olá, ${user.nomeCliente}! Aqui estão todas as suas ordens de serviço:`];
+            
+            if (osAbertas.length > 0) {
+              const listaAbertas = formatarListaOS(osAbertas, false);
+              resposta_partes.push(`\n🔓 **OS Abertas (${osAbertas.length}) - Disponíveis para agendamento:**\n${listaAbertas}`);
+            }
+            
+            if (osAgendadas.length > 0) {
+              const listaAgendadas = formatarListaOS(osAgendadas, true);
+              resposta_partes.push(`\n📅 **OS Agendadas (${osAgendadas.length}):**\n${listaAgendadas}`);
+            }
+            
+            if (osAbertas.length === 0 && osAgendadas.length === 0) {
+              resposta = `${user.nomeCliente}, você não tem nenhuma ordem de serviço no momento.`;
+            } else {
+              resposta_partes.push(`\n\nPrecisa agendar alguma OS aberta ou ver detalhes de alguma agendada? É só me avisar!`);
+              // Ao mostrar todas, convencionamos que a "lista ativa" é a última seção apresentada ao usuário
+              // Para evitar ambiguidade, vamos armazenar somente a parte ABERTAS, se existir; senão, AGENDADAS
+              if (osAbertas.length > 0) {
+                user.ultimaListaOS = [...osAbertas];
+              } else if (osAgendadas.length > 0) {
+                user.ultimaListaOS = [...osAgendadas];
+              } else {
+                user.ultimaListaOS = [];
+              }
+              resposta = resposta_partes.join('');
+            }
+            break;
+          }
+          
+          // Fallback - caso não seja detectado nenhum tipo específico
+          console.log(`[DEBUG] listar_opcoes: Tipo não identificado (${tipoListagem}) - usando fallback`);
           user.osEscolhida = null;
           // Monta lista de OS disponíveis
           let osMsg = 'Nenhuma OS disponível.';
@@ -1041,6 +1216,9 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
             const diaSemanaAgendado = user.osEscolhida.data_agenda_final ? 
                                     diaDaSemanaExtenso(user.osEscolhida.data_agenda_final) : '';
             const assunto = formatarDescricaoOS(user.osEscolhida);
+            
+            // Marcar que a última pergunta foi um menu numerado específico
+            user.tipoUltimaPergunta = 'MENU_OS_AGENDADA';
             
             resposta = `Você selecionou a OS ${user.osEscolhida.id} (${assunto}) que já está agendada para ${diaSemanaAgendado}, ` +
                       `dia ${dataAgendada}, no período da ${periodoAgendado}.\n\n` +
@@ -1635,55 +1813,6 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
           // user.etapaAtual = 'extrair_data'; // Set the conversation to expect a date next.
           break;
         }
-        case 'listar_opcoes': {
-          if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
-            break;
-          }
-
-          // Garante que a lista de OS está carregada
-          if (!user.osList || user.osList.length === 0) {
-            const osListAtualizada = await buscarOSPorClienteId(user.clienteId);
-            if (osListAtualizada && osListAtualizada.length > 0) {
-              user.osList = osListAtualizada;
-            } else {
-              resposta = 'Não encontrei nenhuma ordem de serviço para você no momento.';
-              break;
-            }
-          }
-
-          const osAbertas = user.osList.filter(o => o.status === 'A' || o.status === 'EN');
-          const osAgendadas = user.osList.filter(o => o.status === 'AG');
-
-          const partes = [];
-          // Prefácio amigável
-          partes.push('Claro! Deixa eu ver o que encontrei para você.');
-
-          // Detectar preferência do usuário: "aberta" vs "agendada"
-          const msgNorm = (mensagem || '').toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '');
-          const querAbertas = /aberta|aberto/.test(msgNorm);
-          const querAgendadas = /agendada|agendado|agendada[s]?|detalhe|visita|marcada|reagendar/.test(msgNorm);
-
-          if (osAbertas.length > 0 && (!querAgendadas || querAbertas)) {
-            const listaAbertas = formatarListaOS(osAbertas);
-            partes.push(`Você tem ${osAbertas.length} OS aberta(s) para agendamento:\n${listaAbertas}`);
-            partes.push('Para agendar, é só me dizer o número da OS.');
-          }
-
-          if (osAgendadas.length > 0 && (!querAbertas || querAgendadas)) {
-            const listaAgendadas = formatarListaOS(osAgendadas, true);
-            partes.push(`Você também tem ${osAgendadas.length} visita(s) já agendada(s):\n${listaAgendadas}`);
-            partes.push('Se precisar, pode pedir para ver detalhes ou reagendar uma delas.');
-          }
-
-          if (osAbertas.length === 0 && osAgendadas.length === 0) {
-            partes.push('Não encontrei nenhuma ordem de serviço aberta ou agendada para você no momento.');
-          }
-
-          resposta = partes.join('\n\n');
-          break;
-        }
 
         case 'consultar_disponibilidade_data': {
           if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
@@ -1927,7 +2056,7 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
             const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
             const assunto = formatarDescricaoOS(user.osEscolhida);
             
-            resposta = `Confirma o agendamento para ${diaSemana}, ${dataFormatada} pela ${periodoExtenso}  para OS ${user.osEscolhida.id} (${assunto}). `;
+            resposta = `Só para confirmar: posso agendar para ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}, para a OS ${user.osEscolhida.id} (${assunto})?`;
             
             user.aguardandoConfirmacao = true;
             break;
@@ -1948,18 +2077,43 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
             melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
           };
           
-          console.log(`Enviando agendamento: OS=${user.osEscolhida.id}, Data=${dataAgendamento}, Período=${user.periodoAgendamento}`);
+          console.log(`[DEBUG] confirmar_agendamento - INICIANDO AGENDAMENTO:`);
+          console.log(`[DEBUG] - OS ID: ${user.osEscolhida.id}`);
+          console.log(`[DEBUG] - Data/Hora: ${dataAgendamento}`);
+          console.log(`[DEBUG] - Período: ${user.periodoAgendamento}`);
+          console.log(`[DEBUG] - Técnico: ${user.id_tecnico}`);
+          console.log(`[DEBUG] - Payload completo:`, JSON.stringify(payload, null, 2));
 
-          const resultado = await atualizarOS(user.osEscolhida.id, payload);
-          console.log('resultado: ' + JSON.stringify(resultado));
+          let resultado;
+          try {
+            console.log(`[DEBUG] confirmar_agendamento - Chamando atualizarOS...`);
+            resultado = await atualizarOS(user.osEscolhida.id, payload);
+            console.log(`[DEBUG] confirmar_agendamento - Resultado da atualizarOS:`, JSON.stringify(resultado, null, 2));
+            console.log(`[DEBUG] confirmar_agendamento - Tipo do resultado: ${typeof resultado}`);
+            console.log(`[DEBUG] confirmar_agendamento - Propriedades do resultado:`, Object.keys(resultado || {}));
+          } catch (error) {
+            console.error(`[DEBUG] confirmar_agendamento - ERRO CAPTURADO na atualizarOS:`);
+            console.error(`[DEBUG] confirmar_agendamento - Erro message: ${error.message}`);
+            console.error(`[DEBUG] confirmar_agendamento - Erro status: ${error.response?.status}`);
+            console.error(`[DEBUG] confirmar_agendamento - Erro data:`, JSON.stringify(error.response?.data, null, 2));
+            console.error(`[DEBUG] confirmar_agendamento - Stack trace:`, error.stack);
+            resultado = { type: 'error', message: error.message, originalError: error.response?.data };
+          }
+          
+          console.log(`[DEBUG] confirmar_agendamento - ANALISANDO RESULTADO:`);
+          console.log(`[DEBUG] - resultado?.type: ${resultado?.type}`);
+          console.log(`[DEBUG] - resultado?.detalhes?.type: ${resultado?.detalhes?.type}`);
+          console.log(`[DEBUG] - Estrutura completa:`, JSON.stringify(resultado, null, 2));
           
           // Verificar se houve erro no agendamento
           if (resultado?.detalhes?.type === 'error' || resultado?.type === 'error') {
+            console.log(`[DEBUG] confirmar_agendamento - ERRO DETECTADO no agendamento`);
             // Captura o objeto que contém a mensagem de erro (detalhes ou o próprio resultado)
             const errorObject = resultado?.detalhes?.type === 'error' ? resultado.detalhes : resultado;
             const errorMessage = errorObject.message || 'Erro desconhecido';
             
-            console.error('Erro no agendamento:', errorMessage);
+            console.error(`[DEBUG] confirmar_agendamento - Mensagem de erro: ${errorMessage}`);
+            console.error(`[DEBUG] confirmar_agendamento - Objeto de erro completo:`, JSON.stringify(errorObject, null, 2));
             
             // Tratar erros comuns de forma amigável
             if (errorMessage.includes('Data de fim deve ser maior')) {
@@ -1971,13 +2125,22 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
               const cleanError = errorMessage.replace(/<[^>]*>/g, '');
               resposta = `Desculpe, não consegui agendar sua visita neste momento. Erro: ${cleanError}. Por favor, tente novamente mais tarde ou entre em contato com nosso suporte.`;
             }
-          } else if (user.osEscolhida && user.dataInterpretada && user.periodoAgendamento) {
-            const assunto = formatarDescricaoOS(user.osEscolhida);
-            const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
-            const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
-            resposta = `Prontinho! Sua visita para ${assunto} está agendada! Ficou para ${diaSemana}, dia ${dataFormatada} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
           } else {
-            resposta = `✅ Agendado para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}.`;
+            console.log(`[DEBUG] confirmar_agendamento - SUCESSO DETECTADO no agendamento`);
+            console.log(`[DEBUG] - user.osEscolhida existe: ${!!user.osEscolhida}`);
+            console.log(`[DEBUG] - user.dataInterpretada: ${user.dataInterpretada}`);
+            console.log(`[DEBUG] - user.periodoAgendamento: ${user.periodoAgendamento}`);
+            
+            if (user.osEscolhida && user.dataInterpretada && user.periodoAgendamento) {
+              const assunto = formatarDescricaoOS(user.osEscolhida);
+              const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+              const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+              resposta = `Prontinho! Sua visita para ${assunto} está agendada! Ficou para ${diaSemana}, dia ${dataFormatada} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}. Estou finalizando nosso atendimento. Caso precise de mim, estou por aqui.`;
+              console.log(`[DEBUG] confirmar_agendamento - Resposta de sucesso gerada: ${resposta}`);
+            } else {
+              resposta = `✅ Agendado para ${dayjs(user.dataInterpretada).format('DD/MM/YYYY')} no período da ${user.periodoAgendamento === 'M' ? 'manhã' : 'tarde'}.`;
+              console.log(`[DEBUG] confirmar_agendamento - Resposta de sucesso simples gerada: ${resposta}`);
+            }
           }
 
           console.log('antes de agendar: LOG ESTADO ');
@@ -2150,6 +2313,28 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
             break;
           }
 
+          // Verificar se o usuário está perguntando sobre OS agendadas especificamente
+          const perguntaAgendadas = /agendad[ao]s?|já\s+agendad[ao]s?|visitas?\s+agendad[ao]s?/i.test(mensagem);
+          
+          if (perguntaAgendadas) {
+            // console.log(`[DEBUG] verificar_os: Usuário perguntou sobre OS agendadas`);
+            
+            const lista = await buscarOSPorClienteId(user.clienteId);
+            const osAgendadas = lista.filter(o => o.status === 'AG');
+            
+            // console.log(`[DEBUG] verificar_os - Total de OS: ${lista.length}`);
+            // console.log(`[DEBUG] verificar_os - OS Agendadas encontradas: ${osAgendadas.length}`);
+            // console.log(`[DEBUG] verificar_os - IDs das OS Agendadas: ${osAgendadas.map(o => o.id).join(', ')}`);
+            
+            if (osAgendadas.length > 0) {
+              const listaAgendadas = formatarListaOS(osAgendadas, true); // true para incluir data
+              resposta = `Sim, ${user.nomeCliente}! Você tem ${osAgendadas.length} visita(s) já agendada(s):\n\n${listaAgendadas}\n\nSe precisar reagendar ou ver mais detalhes de alguma, é só me avisar!`;
+            } else {
+              resposta = `Não, ${user.nomeCliente}. Você não tem nenhuma visita agendada no momento. Mas você tem ordens de serviço abertas que podem ser agendadas. Gostaria de ver a lista delas?`;
+            }
+            break;
+          }
+
           // Tentar extrair número da OS da mensagem do usuário se não há OS selecionada
           if (!user.osEscolhida) {
             const numeroOSMencionado = await interpretarNumeroOS({ mensagem: mensagem, osList: user.osList });
@@ -2306,23 +2491,50 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
             dados: contexto,
             promptExtra: 'Encerrar atendimento.',
           });
-          // Limpar todas as variáveis do usuário antes de resetar a sessão
+          // Preservar dados essenciais e limpar apenas o que pode atrapalhar um novo fluxo
+          const identidade = {
+            numero: user.numero,
+            cpf: user.cpf,
+            clienteId: user.clienteId,
+            nomeCliente: user.nomeCliente,
+          };
           usuarios[numero] = {
+            ...identidade,
             etapa: 'inicio',
             etapaAnterior: '',
             etapaAtual: 'inicio',
             mensagemAnteriorGPT: '',
             mensagemAnteriorCliente: '',
-            cpf: null,
-            clienteId: null,
-            nomeCliente: null,
+            // Limpar variáveis de agendamento/estado para evitar interferência
             osList: [],
             osEscolhida: null,
+            ultimaListaOS: [],
             dataInterpretada: null,
             periodoAgendamento: null,
             sugestaoData: null,
-            sugestaoHora: null,
+            sugestaoPeriodo: null,
+            sugestoesAgendamento: null,
+            id_tecnico: null,
+            aguardandoConfirmacao: false,
+            tipoUltimaPergunta: null,
           };
+          // Recarregar lista de OS do cliente após finalização
+          if (identidade.clienteId) {
+            try {
+              buscarOSPorClienteId(identidade.clienteId)
+                .then(osListAtualizada => {
+                  if (Array.isArray(osListAtualizada)) {
+                    usuarios[numero].osList = osListAtualizada;
+                    console.log(`[finalizado] Lista de OS recarregada: ${osListAtualizada.length} OS`);
+                  } else {
+                    usuarios[numero].osList = [];
+                  }
+                })
+                .catch(err => console.error('[finalizado] Erro ao recarregar OS:', err));
+            } catch (e) {
+              console.error('[finalizado] Falha ao iniciar recarga de OS:', e);
+            }
+          }
           break;
         }
       } 
@@ -2344,6 +2556,21 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
         resposta = 'Desculpe, não consegui entender. Pode tentar novamente? Se precisar de ajuda, digite "opções".';
       }
     }
+
+    // Refatora a resposta original com um guardião de timeout e fallback para a resposta bruta
+    try {
+      const refinoPromise = refatorarResposta(resposta, 'agent_supervisor', user, intent, mensagem, contexto, user.dataInterpretada);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 5000)); // 5s timeout
+      const refinada = await Promise.race([refinoPromise, timeoutPromise]);
+      if (typeof refinada === 'string' && refinada.trim().length > 0) {
+        resposta = refinada.trim();
+      } // senão, mantém a resposta original
+      user.mensagemAnteriorGPT = resposta;
+    } catch (e) {
+      console.error('[refatorarResposta] falhou, enviando resposta original:', e?.message || e);
+      // mantém 'resposta' como estava
+    }
+
 
     /* ----------- LOG COMPLETO DO ESTADO ANTES DE RESPONDER --------- */
     logEstado({ numero, user, intent, resposta });
@@ -2444,7 +2671,7 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
          await enviarMensagemWhatsApp({
            to: numero,
           from: twilioWhatsappNumberFallback,
-          body: 'Desculpe, ocorreu um erro interno ao processar sua solicitação. Tente novamente mais tarde.'
+          body: 'Desculpe, ocorreu um erro interno ao processar sua solicitação. Envie novamente seu CPF para que a gente recomece a conversa.'
         });
       }
     } catch (sendError) {
