@@ -50,7 +50,12 @@ async function verificarDisponibilidade(os, opcoes = {}) {
   
   // Verificar se é dia útil
   if (!isDiaUtil(dataObj)) {
-    return { disponivel: false, motivo: 'Não é um dia útil' };
+    const nomeDiaSemana = dataObj.format('dddd');
+    const dataFormatada = dataObj.format('DD/MM/YYYY');
+    return { 
+      disponivel: false, 
+      motivo: `Infelizmente, ${nomeDiaSemana}, ${dataFormatada}, não é um dia útil. Nossos técnicos trabalham de segunda a sexta-feira.`
+    };
   }
   
   // Gerar sugestões de agendamento para obter técnicos disponíveis
@@ -181,7 +186,12 @@ async function verificarDisponibilidadeData(os, opcoes = {}) {
   
   // Verificar se é dia útil
   if (!isDiaUtil(dataObj)) {
-    return { disponivel: false, motivo: 'Não é um dia útil' };
+    const nomeDiaSemana = dataObj.format('dddd');
+    const dataFormatada = dataObj.format('DD/MM/YYYY');
+    return { 
+      disponivel: false, 
+      motivo: `Infelizmente, ${nomeDiaSemana}, ${dataFormatada}, não é um dia útil. Nossos técnicos trabalham de segunda a sexta-feira.`
+    };
   }
   
   // Verificar se não é agendamento para hoje
@@ -292,7 +302,22 @@ async function gerarSugestoesDeAgendamento(os, opcoes = {}) {
   
   // Se foi especificada uma data, usar essa data como mínima
   if (dataEspecifica && dayjs(dataEspecifica).isValid()) {
-    dataMinimaObj = dayjs(dataEspecifica);
+    const dataEspecificaObj = dayjs(dataEspecifica);
+    
+    // VALIDAR SLA ANTES DE ACEITAR A DATA ESPECÍFICA
+    const erroSLA = validarSLA(os, dataEspecificaObj);
+    if (erroSLA) {
+      console.log('[ERROR] Data específica fora do SLA:', dataEspecifica, erroSLA.motivo);
+      // Retornar erro de SLA ao invés de continuar
+      return {
+        sugestao: null,
+        alternativas: [],
+        erro: erroSLA.motivo,
+        tipo_erro: 'SLA'
+      };
+    }
+    
+    dataMinimaObj = dataEspecificaObj;
     console.log(`[INFO] Usando data específica como mínima: ${dataMinimaObj.format('DD/MM/YYYY')}`);
   } else {
     dataMinimaObj = dayjs(); // Começa de hoje

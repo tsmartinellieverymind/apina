@@ -38,7 +38,7 @@ Sua missão é **refatorar a mensagem do agente** para que pareça mais humana, 
 
 ### Instruções
 1. Mantenha o **sentido original** da mensagem (${resposta}), mas ajuste tom e fluidez.  
-1.1 Se a base for pergunta, a saída deve terminar com “?”.
+1.1 Se a base for pergunta, a saída deve terminar com "?".
 1.2 Se for afirmação, mantenha como afirmação.
 2. Se houver incoerência com o contexto, corrija de forma suave.  
 3. Evite repetições e frases robóticas.  
@@ -48,6 +48,7 @@ Sua missão é **refatorar a mensagem do agente** para que pareça mais humana, 
 7. Use emojis sempre que possível. Com abundancia.
 8. Respeite as normas LGPD e DPO.
 9. Nunca fale que o agendamento está para determinado horario diga sempre que está no periodo da manhã ou tarde.
+10. **CRÍTICO**: No contexto da Ibiunet, "OS" SEMPRE significa "Ordem de Serviço" (nunca Sistema Operacional). JAMAIS substitua "OS" por "sistema operacional". Mantenha sempre como "OS" ou "Ordem de Serviço".
 
 ### Contexto
 - Intent: ${intent}  
@@ -69,7 +70,7 @@ Sua missão é **refatorar a mensagem do agente** para que pareça mais humana, 
         { role: 'system', content: `Você é ${agent.nome}, com a personalidade: ${agent.personality}` },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.9
+      temperature: 0.6
     });
 
     return respostaFinal.choices[0].message.content.trim();
@@ -110,7 +111,6 @@ Você é **${agent.nome}**.
 - Última mensagem do usuário: "${mensagem}"  
 
 ${resumoAbertas}
-
 ${resumoAgendadas}
 ${ultimaListaInfo}
 
@@ -214,21 +214,23 @@ Você é ${agent.nome}, um assistente da Ibiunet.
 Sua função é analisar a mensagem do cliente e detectar qual a intenção dele, com base nas opções disponíveis abaixo.
 
 ### Regras Fixas (em ordem de prioridade):
-1. Se identificar 11 números seguidos → **extrair_cpf**.
-2. Se mencionar "CPF" mas sem número → **aleatorio**.
-3. Se disser "primeira", "segunda", "terceira" → **escolher_os**.
-4. Se o usuário mencionar um dia da semana específico (segunda, terça, quarta, etc.) ou uma data (amanhã, dia 10, próxima semana) → **extrair_data**, mesmo que use frases como "pode ser" ou "prefiro".
-5. Se o usuário mencionar um período do dia (manhã, tarde) ou horário específico → **extrair_hora**, mesmo que use frases como "pode ser" ou "prefiro".
-6. Se disser "ok", "pode ser", "fechado" ou similares SEM mencionar uma data ou período específico:
-   - Se a ÚLTIMA PERGUNTA foi sobre **agendamento**, e a resposta é de aceitação → **confirmar_agendamento**.
-   - Se foi sobre **escolha de OS**, e a resposta é de aceitação → **confirmar_escolha_os**.
-7. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
-8. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
-9. Se a última pergunta foi uma lista numerada (1. Ver detalhes, 2. Reagendar, 3. Voltar) e o usuário responde com um número:
+1. Se a mensagem tem 1-2 caracteres OU é sem sentido (como "b.", "x", ".", "a", "??", "kkk") → **aleatorio**.
+2. Se identificar 11 números seguidos → **extrair_cpf**.
+3. Se mencionar "CPF" mas sem número → **aleatorio**.
+4. Se disser "primeira", "segunda", "terceira" → **escolher_os**.
+5. Se o usuário mencionar um dia da semana específico (segunda, terça, quarta, etc.) ou uma data (amanhã, dia 10, próxima semana) → **extrair_data**, mesmo que use frases como "pode ser" ou "prefiro".
+6. Se o usuário mencionar um período do dia (manhã, tarde) ou horário específico → **extrair_hora**, mesmo que use frases como "pode ser" ou "prefiro".
+7. Se disser "ok", "pode ser", "fechado", "sim", "confirmo", "perfeito", "tudo bem", "aceito" ou similares SEM mencionar uma data ou período específico:
+   - IMPORTANTE: Mensagens muito curtas (1-2 caracteres) ou sem sentido (como "b.", "x", ".", "a") devem ser classificadas como **aleatorio**.
+   - Se a ÚLTIMA PERGUNTA foi sobre **agendamento**, e a resposta é de aceitação CLARA → **confirmar_agendamento**.
+   - Se foi sobre **escolha de OS**, e a resposta é de aceitação CLARA → **confirmar_escolha_os**.
+8. Se o usuário pedir para **sugerir horário**, **escolher outro horário**, ou **sugerir/listar opções** → **agendar_data**.
+9. Se o usuário **perguntar sobre disponibilidade** de uma data/horário específico (ex: "tem para dia X?", "está disponível dia X?") → **consultar_disponibilidade_data**.
+10. Se a última pergunta foi uma lista numerada (1. Ver detalhes, 2. Reagendar, 3. Voltar) e o usuário responde com um número:
    - Se responder "1" → **mais_detalhes**.
    - Se responder "2" → **mudar_de_os**.
    - Se responder "3" → **listar_opcoes**.
-10. Se o usuário pedir para **ver**, **listar** ou **mostrar** as OS (ex: "ver as OS em aberto", "quais são as OS", "listar OS", "tem OS aberta", "tem OS agendada") → **listar_opcoes**.
+11. Se o usuário pedir para **ver**, **listar** ou **mostrar** as OS (ex: "ver as OS em aberto", "quais são as OS", "listar OS", "tem OS aberta", "tem OS agendada") → **listar_opcoes**.
 
 ### Exemplos de Classificação Correta:
 - "pode ser" (sem mencionar data/hora) → **confirmar_agendamento**
@@ -240,6 +242,16 @@ Sua função é analisar a mensagem do cliente e detectar qual a intenção dele
 - "tem OS aberta pra mim?" → **listar_opcoes**
 - "quais OS tenho em aberto?" → **listar_opcoes**
 - "tem alguma OS agendada?" → **listar_opcoes**
+
+### Exemplos de Mensagens Aleatórias (devem ser classificadas como **aleatorio**):
+- "b." → **aleatorio**
+- "x" → **aleatorio**
+- "." → **aleatorio**
+- "a" → **aleatorio**
+- "123" → **aleatorio**
+- "asdf" → **aleatorio**
+- "???" → **aleatorio**
+- "kkk" → **aleatorio**
 
 ### Contexto da conversa:
 - Última intent detectada: ${intentAnterior}

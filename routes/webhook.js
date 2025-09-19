@@ -910,13 +910,50 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => { 
             resposta = `No momento você não tem OS abertas, mas possui visitas agendadas:\n\n${listaAg}\n\nSe quiser reagendar alguma, é só me dizer o número.`;
           } else {
             user.ultimaListaOS = [];
-            resposta = 'Você não tem ordens de serviço abertas ou agendadas no momento.';
           }
 
           break;
         }
         case 'listar_opcoes': {
           if (!(await ensureClienteId(user, { get resposta() { return resposta; }, set resposta(value) { resposta = value; } }))) {
+            break;
+          }
+          
+          // VERIFICAR SE USUÁRIO ESTÁ NO CONTEXTO DE AGENDAMENTO E QUER MAIS DATAS
+          if (user.osEscolhida && (mensagem.toLowerCase().includes('mais') || mensagem.toLowerCase().includes('outras') || mensagem.toLowerCase().includes('opções'))) {
+            console.log('[DEBUG] listar_opcoes: Usuário no contexto de agendamento pedindo mais datas');
+            
+            try {
+              // Gerar mais sugestões de agendamento para a OS escolhida
+              const { sugestao, alternativas } = await gerarSugestoesDeAgendamento(user.osEscolhida);
+              
+              if (alternativas && alternativas.length > 0) {
+                // Mostrar mais alternativas (além das já mostradas)
+                const todasAlternativas = [sugestao, ...alternativas].filter(Boolean);
+                
+                // Limitar a 8 opções para não sobrecarregar
+                const opcoes = todasAlternativas.slice(0, 8).map(alt => {
+                  const dataFormatada = dayjs(alt.data).format('DD/MM/YYYY');
+                  const diaSemana = diaDaSemanaExtenso(alt.data);
+                  const periodoExtenso = alt.periodo === 'M' ? 'manhã' : 'tarde';
+                  return `• ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}`;
+                }).join('\n');
+                
+                const assunto = formatarDescricaoOS(user.osEscolhida);
+                resposta = `Claro! Aqui estão mais opções de datas para sua ${assunto}:\n\n${opcoes}\n\nQual dessas datas funciona melhor para você? 😊`;
+                
+                // Armazenar sugestões para uso posterior
+                user.sugestoesAgendamento = { sugestao, alternativas };
+                
+              } else {
+                resposta = `Infelizmente, essas são todas as opções disponíveis no momento para sua OS. Gostaria de escolher uma das datas que já sugeri? 😊`;
+              }
+              
+            } catch (error) {
+              console.error('[DEBUG] listar_opcoes: Erro ao gerar mais sugestões:', error);
+              resposta = `Ops! Tive um probleminha ao buscar mais datas. Que tal escolher uma das opções que já sugeri? 😊`;
+            }
+            
             break;
           }
           
@@ -1959,45 +1996,215 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
           // Log do estado inicial
           console.log('[DEBUG] confirmar_agendamento: Estado inicial - Data:', dataConfirmacao, 'Período:', periodoConfirmacao);
           
-          // 2. Se não temos data E período, tentar extrair da mensagem atual
-          if (!dataConfirmacao || !periodoConfirmacao) {
-            console.log('[DEBUG] confirmar_agendamento: Tentando extrair data/período da mensagem:', mensagem);
-            const interpretadoDaMensagem = await interpretaDataePeriodo({
+          // VERIFICAR SE ESTAMOS AGUARDANDO CONFIRMAÇÃO DE NOVA DATA
+          if (user.tipoUltimaPergunta === 'AGENDAMENTO_CONFIRMACAO_NOVA_DATA') {
+            console.log('[DEBUG] confirmar_agendamento: Verificando confirmação de nova data');
+            
+            // Verificar se é confirmação positiva
+            const mensagemLower = mensagem.toLowerCase().trim();
+            const confirmacoesPositivas = ['sim', 'ok', 'pode ser', 'fechado', 'confirmo', 'quero', 'vamos', 'perfeito', 'confirma', 'confirmar'];
+            const confirmacoesNegativas = ['não', 'nao', 'não pode', 'nao pode', 'cancelar', 'desistir'];
+            
+            if (confirmacoesPositivas.some(palavra => mensagemLower.includes(palavra))) {
+              console.log('[DEBUG] confirmar_agendamento: Confirmação positiva para nova data, prosseguindo com agendamento');
+              // Limpar flag e continuar com o agendamento usando os dados já armazenados
+              user.tipoUltimaPergunta = null;
+              dataConfirmacao = user.dataInterpretada;
+              periodoConfirmacao = user.periodoAgendamento;
+              // Pular para a parte de agendamento
+            } else if (confirmacoesNegativas.some(palavra => mensagemLower.includes(palavra))) {
+              console.log('[DEBUG] confirmar_agendamento: Confirmação negativa, oferecendo alternativas');
+              user.tipoUltimaPergunta = null;
+              resposta = `Sem problemas! Que tal voltarmos às opções originais que sugeri? Ou você prefere escolher outra data? 😊`;
+              break;
+            } else {
+              // Resposta ambígua, perguntar novamente
+              const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+              const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+              const periodoExtenso = user.periodoAgendamento === 'M' ? 'manhã' : 'tarde';
+              const assunto = formatarDescricaoOS(user.osEscolhida);
+              
+              resposta = `Posso confirmar o agendamento da ${assunto} para ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}? Por favor, responda com "sim" ou "não". 😊`;
+              break;
+            }
+          }
+          
+          // 2. SEMPRE tentar extrair data/período da mensagem atual primeiro
+          console.log('[DEBUG] confirmar_agendamento: Tentando extrair data/período da mensagem:', mensagem);
+          
+          // Verificar se estamos aguardando resposta sobre período específico
+          const aguardandoPeriodo = user.dataInterpretada && !user.periodoAgendamento;
+          console.log('[DEBUG] confirmar_agendamento: Aguardando resposta sobre período:', aguardandoPeriodo);
+          
+          let interpretadoDaMensagem = null;
+          
+          if (aguardandoPeriodo) {
+            // Se estamos aguardando período, não interpretar números como datas
+            console.log('[DEBUG] confirmar_agendamento: Interpretando apenas período (ignorando números como datas)');
+            
+            // Verificar se mensagem contém período
+            const matchPeriodo = mensagem.match(/\b(manhã|manha|tarde|noite)\b/i);
+            if (matchPeriodo) {
+              const periodo = matchPeriodo[1].toLowerCase().includes('tarde') ? 'T' : 'M';
+              interpretadoDaMensagem = {
+                data_interpretada: user.dataInterpretada, // Manter data já definida
+                periodo_interpretado: periodo
+              };
+              console.log('[DEBUG] confirmar_agendamento: Período interpretado:', periodo);
+            } else {
+              // Verificar se é confirmação da data (número igual ao dia já sugerido)
+              const diaAtual = dayjs(user.dataInterpretada).date();
+              const numeroNaMensagem = mensagem.match(/\b(\d{1,2})\b/);
+              
+              if (numeroNaMensagem && parseInt(numeroNaMensagem[1]) === diaAtual) {
+                console.log('[DEBUG] confirmar_agendamento: Número corresponde ao dia já sugerido, assumindo confirmação da data');
+                
+                // Perguntar período novamente de forma mais clara
+                const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+                
+                resposta = `Perfeito! Confirmado para ${diaSemana}, ${dataFormatada}. Agora me diga: você prefere manhã ou tarde? 😊`;
+                
+                console.log('[DEBUG] confirmar_agendamento: Confirmação da data, perguntando período novamente');
+                break; // Sair do case para enviar a resposta
+              } else {
+                // Não entendeu a resposta, perguntar novamente
+                const dataFormatada = dayjs(user.dataInterpretada).format('DD/MM/YYYY');
+                const diaSemana = diaDaSemanaExtenso(user.dataInterpretada);
+                
+                resposta = `Para ${diaSemana}, ${dataFormatada}, você prefere **manhã** ou **tarde**? Por favor, me diga qual período você prefere! 😊`;
+                
+                console.log('[DEBUG] confirmar_agendamento: Não entendeu resposta sobre período, perguntando novamente');
+                break; // Sair do case para enviar a resposta
+              }
+            }
+          } else {
+            // Interpretação normal quando não estamos aguardando período específico
+            interpretadoDaMensagem = await interpretaDataePeriodo({
               mensagem,
               agentId: 'agent_os',
               dados: contexto,
               promptExtra: 'Tente identificar data e/ou período para o agendamento na mensagem de confirmação.'
             });
+          }
 
-            if (interpretadoDaMensagem) {
-              // Só atualiza valores que estejam faltando
-              if (!dataConfirmacao && interpretadoDaMensagem.data_interpretada && 
-                  dayjs(interpretadoDaMensagem.data_interpretada).isValid()) {
-                dataConfirmacao = interpretadoDaMensagem.data_interpretada;
-                console.log('[DEBUG] confirmar_agendamento: Data extraída da mensagem:', dataConfirmacao);
-              }
+          if (interpretadoDaMensagem) {
+            // SEMPRE atualizar se encontrou nova data/período na mensagem
+            if (interpretadoDaMensagem.data_interpretada && 
+                dayjs(interpretadoDaMensagem.data_interpretada).isValid()) {
+              const novaData = interpretadoDaMensagem.data_interpretada;
+              console.log('[DEBUG] confirmar_agendamento: Nova data extraída da mensagem:', novaData);
               
-              if (!periodoConfirmacao && interpretadoDaMensagem.periodo_interpretado) {
-                periodoConfirmacao = interpretadoDaMensagem.periodo_interpretado;
-                console.log('[DEBUG] confirmar_agendamento: Período extraído da mensagem:', periodoConfirmacao);
+              // Verificar se a nova data é diferente da sugestão anterior
+              // Tratar casos onde user.sugestaoData pode ser null/undefined na primeira interação
+              const sugestaoAtual = user.sugestaoData || null;
+              const novaDataStr = String(novaData);
+              const sugestaoStr = sugestaoAtual ? String(sugestaoAtual) : null;
+              
+              console.log('[DEBUG] confirmar_agendamento: Comparando datas - Nova:', novaDataStr, 'Sugestão atual:', sugestaoStr);
+              
+              if (novaDataStr !== sugestaoStr) {
+                console.log('[DEBUG] confirmar_agendamento: Usuário solicitou data diferente da sugestão');
+                
+                // Verificar se o usuário especificou período
+                const periodoSolicitado = interpretadoDaMensagem.periodo_interpretado;
+                
+                if (!periodoSolicitado) {
+                  // Usuário só forneceu data, perguntar período
+                  const dataFormatada = dayjs(novaData).format('DD/MM/YYYY');
+                  const diaSemana = diaDaSemanaExtenso(novaData);
+                  
+                  resposta = `Para ${diaSemana}, ${dataFormatada}, você prefere manhã ou tarde? 😊`;
+                  
+                  // Armazenar a data solicitada para usar na próxima resposta
+                  user.dataInterpretada = novaData;
+                  user.periodoAgendamento = null; // Limpar período para forçar nova pergunta
+                  
+                  console.log('[DEBUG] confirmar_agendamento: Data fornecida sem período, perguntando período');
+                  break; // Sair do case para enviar a resposta
+                }
+                
+                try {
+                  const sugestaoParaDataEspecifica = await gerarSugestoesDeAgendamento(user.osEscolhida, {
+                    dataEspecifica: novaData,
+                    periodoEspecifico: periodoSolicitado
+                  });
+                  
+                  // Verificar se houve erro de SLA
+                  if (sugestaoParaDataEspecifica?.tipo_erro === 'SLA') {
+                    const dataFormatada = dayjs(novaData).format('DD/MM/YYYY');
+                    const diaSemana = diaDaSemanaExtenso(novaData);
+                    
+                    resposta = `Infelizmente, ${diaSemana}, ${dataFormatada}, está fora do prazo permitido para agendamento. ${sugestaoParaDataEspecifica.erro} ` +
+                              `Posso manter o agendamento para a data que sugeri anteriormente (${dayjs(user.sugestaoData).format('DD/MM/YYYY')}) ` +
+                              `ou você prefere que eu busque outras opções disponíveis?`;
+                    
+                    console.log('[DEBUG] confirmar_agendamento: Data solicitada fora do SLA:', sugestaoParaDataEspecifica.erro);
+                    break; // Sair do case para enviar a resposta
+                  }
+                  
+                  if (sugestaoParaDataEspecifica?.sugestao) {
+                    // Data disponível, MAS PERGUNTAR CONFIRMAÇÃO antes de agendar
+                    const dataFormatada = dayjs(novaData).format('DD/MM/YYYY');
+                    const diaSemana = diaDaSemanaExtenso(novaData);
+                    const periodoExtenso = periodoSolicitado === 'M' ? 'manhã' : 'tarde';
+                    const assunto = formatarDescricaoOS(user.osEscolhida);
+                    
+                    // Armazenar dados para confirmação posterior
+                    user.dataInterpretada = novaData;
+                    user.periodoAgendamento = periodoSolicitado;
+                    user.id_tecnico = sugestaoParaDataEspecifica.sugestao.id_tecnico;
+                    user.tipoUltimaPergunta = 'AGENDAMENTO_CONFIRMACAO_NOVA_DATA';
+                    
+                    resposta = `Perfeito! Posso confirmar o agendamento da ${assunto} para ${diaSemana}, ${dataFormatada}, no período da ${periodoExtenso}? 😊`;
+                    
+                    console.log('[DEBUG] confirmar_agendamento: Data solicitada disponível, pedindo confirmação antes de agendar:', novaData, periodoSolicitado);
+                    break; // Sair do case para enviar a pergunta de confirmação
+                  } else {
+                    // Data não disponível, informar ao usuário
+                    const dataFormatada = dayjs(novaData).format('DD/MM/YYYY');
+                    const diaSemana = diaDaSemanaExtenso(novaData);
+                    
+                    resposta = `Infelizmente, não temos disponibilidade para ${diaSemana}, ${dataFormatada}. ` +
+                              `Posso manter o agendamento para a data que sugeri anteriormente (${dayjs(user.sugestaoData).format('DD/MM/YYYY')}) ` +
+                              `ou você prefere que eu busque outras opções disponíveis?`;
+                    
+                    console.log('[DEBUG] confirmar_agendamento: Data solicitada indisponível, oferecendo alternativas');
+                    break; // Sair do case para enviar a resposta
+                  }
+                } catch (error) {
+                  console.error('[DEBUG] confirmar_agendamento: Erro ao verificar disponibilidade:', error);
+                  // Em caso de erro, usar a data original como fallback
+                  dataConfirmacao = user.dataInterpretada || user.sugestaoData;
+                  periodoConfirmacao = user.periodoAgendamento || user.sugestaoPeriodo;
+                }
+              } else {
+                // Data é a mesma da sugestão, continuar normalmente
+                dataConfirmacao = novaData;
               }
             }
             
-            // 3. Verificar se há uma sugestão pendente (apenas se ainda faltar algum dado)
-            if ((!dataConfirmacao || !periodoConfirmacao) && 
-                user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO' && 
+            if (interpretadoDaMensagem.periodo_interpretado) {
+              periodoConfirmacao = interpretadoDaMensagem.periodo_interpretado;
+              console.log('[DEBUG] confirmar_agendamento: Período extraído da mensagem (sobrescrevendo anterior):', periodoConfirmacao);
+            }
+          }
+          
+          // 3. Se ainda não temos data E período, usar valores anteriores como fallback
+          if (!dataConfirmacao || !periodoConfirmacao) {
+            console.log('[DEBUG] confirmar_agendamento: Verificando sugestão pendente como fallback');
+            
+            if (user.tipoUltimaPergunta === 'AGENDAMENTO_SUGESTAO' && 
                 user.sugestaoData && user.sugestaoPeriodo) {
-              
-              console.log('[DEBUG] confirmar_agendamento: Verificando sugestão pendente');
               
               if (!dataConfirmacao && user.sugestaoData && dayjs(user.sugestaoData).isValid()) {
                 dataConfirmacao = user.sugestaoData;
-                console.log('[DEBUG] confirmar_agendamento: Usando data da sugestão:', dataConfirmacao);
+                console.log('[DEBUG] confirmar_agendamento: Usando data da sugestão como fallback:', dataConfirmacao);
               }
               
               if (!periodoConfirmacao && user.sugestaoPeriodo) {
                 periodoConfirmacao = user.sugestaoPeriodo;
-                console.log('[DEBUG] confirmar_agendamento: Usando período da sugestão:', periodoConfirmacao);
+                console.log('[DEBUG] confirmar_agendamento: Usando período da sugestão como fallback:', periodoConfirmacao);
               }
             }
           }
@@ -2024,8 +2231,11 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
               if (sugestaoEspecifica?.sugestao?.id_tecnico) {
                 user.sugestaoData = dataConfirmacao;
                 user.sugestaoPeriodo = periodoConfirmacao;
+                user.dataInterpretada = dataConfirmacao; // CORREÇÃO: Atualizar também para resposta final
+                user.periodoAgendamento = periodoConfirmacao; // CORREÇÃO: Atualizar também para resposta final
                 user.id_tecnico = sugestaoEspecifica.sugestao.id_tecnico;
                 console.log(`[DEBUG] confirmar_agendamento: Técnico atualizado para data/período específica: ${user.id_tecnico}`);
+                console.log(`[DEBUG] confirmar_agendamento: CORREÇÃO - Atualizadas variáveis para resposta final: dataInterpretada=${user.dataInterpretada}, periodoAgendamento=${user.periodoAgendamento}`);
               } else {
                 console.log('[DEBUG] confirmar_agendamento: Não foi possível obter técnico para data/período específica');
                 user.id_tecnico = null;
@@ -2067,14 +2277,15 @@ Gostaria de ver mais detalhes ou reagendar ${plural ? 'alguma delas' : 'esta OS'
           const horarioPadrao = user.periodoAgendamento === 'M' ? '09:00:00' : '14:00:00';
           const dataAgendamento = `${user.dataInterpretada} ${horarioPadrao}`; // Formato: YYYY-MM-DD HH:MM:SS
           
-          // Criar o payload com os dados básicos - a função atualizarOS vai calcular as datas corretas
+          // Criar o payload com os dados básicos - definir data_agenda e data_agenda_final corretamente
           console.log(`[DEBUG] CRÍTICO: user.id_tecnico antes do payload = '${user.id_tecnico}' (tipo: ${typeof user.id_tecnico})`);
           const payload = {
            ...user.osEscolhida,
            status: 'AG',
            id_tecnico: user.id_tecnico,
-             data_agenda_final: dataAgendamento, // Formato correto: YYYY-MM-DD HH:MM:SS
-            melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
+           data_agenda: dataAgendamento, // Data de INÍCIO do agendamento
+           data_agenda_final: dataAgendamento, // Data de FIM do agendamento (mesmo horário para serviços pontuais)
+           melhor_horario_agenda: user.periodoAgendamento // Usar o período escolhido (M ou T)
           };
           
           console.log(`[DEBUG] confirmar_agendamento - INICIANDO AGENDAMENTO:`);
